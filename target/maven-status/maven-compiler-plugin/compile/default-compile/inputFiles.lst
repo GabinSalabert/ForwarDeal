@@ -1,0 +1,13 @@
+/Users/leacarlos/Documents/GabinPro/ForwarDeal/src/main/java/com/example/forwardeal/domain/Instrument.java
+/Users/leacarlos/Documents/GabinPro/ForwarDeal/src/main/java/com/example/forwardeal/marketdata/MarketInstrumentData.java
+/Users/leacarlos/Documents/GabinPro/ForwarDeal/src/main/java/com/example/forwardeal/domain/DividendPolicy.java
+/Users/leacarlos/Documents/GabinPro/ForwarDeal/src/main/java/com/example/forwardeal/marketdata/YahooFinanceProvider.java
+/Users/leacarlos/Documents/GabinPro/ForwarDeal/src/main/java/com/example/forwardeal/api/dto/SimulationDtos.java
+/Users/leacarlos/Documents/GabinPro/ForwarDeal/src/main/java/com/example/forwardeal/config/WebConfig.java
+/Users/leacarlos/Documents/GabinPro/ForwarDeal/src/main/java/com/example/forwardeal/Application.java
+/Users/leacarlos/Documents/GabinPro/ForwarDeal/src/main/java/com/example/forwardeal/repository/InstrumentRepository.java
+/Users/leacarlos/Documents/GabinPro/ForwarDeal/src/main/java/com/example/forwardeal/api/InstrumentController.java
+/Users/leacarlos/Documents/GabinPro/ForwarDeal/src/main/java/com/example/forwardeal/marketdata/MarketDataProvider.java
+/Users/leacarlos/Documents/GabinPro/ForwarDeal/src/main/java/com/example/forwardeal/service/SimulationService.java
+/Users/leacarlos/Documents/GabinPro/ForwarDeal/src/main/java/com/example/forwardeal/api/SimulationController.java
+/Users/leacarlos/Documents/GabinPro/ForwarDeal/src/main/java/com/example/forwardeal/marketdata/UniverseListLoader.java
