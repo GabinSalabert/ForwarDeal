@@ -109,6 +109,41 @@ npm run dev -- --port 5210 --strictPort --host
   - Why we use it: to explore and test REST endpoints without writing a client; it shows request/response schemas and sample payloads.
   - How to open: `http://localhost:8080/swagger-ui/index.html` once the backend is running.
 
+- Spring Web (REST layer)
+  - What it is: the Spring MVC stack for building HTTP APIs (controllers, routing, JSON serialization).
+  - Why we use it: to expose `/api/instruments` and `/api/simulations`, handle validation errors, and configure CORS for the frontend.
+  - Where: `com.example.forwardeal.api.*` controllers.
+
+- Validation (Jakarta Bean Validation)
+  - What it is: annotation‑based validation (`@NotBlank`, `@PositiveOrZero`, `@Valid`, etc.).
+  - Why we use it: to validate `SimulationRequest` and nested records safely before running the simulation.
+  - Benefit: concise, declarative constraints with automatic 400 responses on violations.
+
+- springdoc OpenAPI (spec generation)
+  - What it is: a Spring integration that generates an OpenAPI spec from controllers and schemas.
+  - Why we use it: to drive Swagger UI and keep API docs in sync with the code.
+  - Result: typed request/response models based on our Java records.
+
+- Vite (frontend dev server & bundler)
+  - What it is: a fast dev server with HMR and a modern bundling pipeline.
+  - Why we use it: instant feedback during development and optimized builds for production.
+  - Commands: `npm run dev`, `npm run build`.
+
+- TypeScript (typing for the UI)
+  - What it is: a typed superset of JavaScript.
+  - Why we use it: to model API DTOs, chart rows, and component props with compile‑time safety.
+  - Outcome: fewer runtime bugs and clearer contracts between UI and API.
+
+- Tailwind CSS (styling)
+  - What it is: a utility‑first CSS framework.
+  - Why we use it: to implement a minimal, modern dark UI quickly (spacing, colors, typography, responsive) without writing custom CSS files.
+  - Extras: custom scrollbars and gradients via utilities.
+
+- Recharts (charting)
+  - What it is: a React chart library based on SVG.
+  - Why we use it: to compose Area + Bar series, custom gradients, dual axes, and rich tooltips for the portfolio evolution.
+  - In this app: Total & Contributed (areas), Cash (dashed), Yearly dividends (bars).
+
 ## 📁 Structure
 ```
 src/main/java/com/example/forwardeal   # Backend (API, domain, services, provider)
@@ -123,7 +158,7 @@ docs/                                  # Documentation assets (add simulation-ex
 3. Leave Fees (%/yr) auto‑filled. Click “Simulate”.
 4. Toggle REAL to visualize purchasing‑power effects.
 
-![Simulation example](docs/simulation-example.png)
+![Simulation example](https://i.postimg.cc/YCkqK3vy/Capture-d-e-cran-2025-10-12-a-18-44-07.png)
 
 ## ⚖️ License
 MIT
