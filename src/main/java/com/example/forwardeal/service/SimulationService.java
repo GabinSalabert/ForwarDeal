@@ -13,7 +13,7 @@ import java.util.*;
 public class SimulationService {
     // Repository that gives us read-only access to instruments resolved at application start
     private final InstrumentRepository instrumentRepository;
-    // Provider used to fetch historical monthly returns to introduce realistic volatility paths
+    // Market data provider retained for future extensions (kept for constructor wiring)
     private final YahooFinanceProvider marketProvider;
 
     public SimulationService(InstrumentRepository instrumentRepository, YahooFinanceProvider marketProvider) {
@@ -33,13 +33,6 @@ public class SimulationService {
             instrumentMap.put(p.isin(), instrumentRepository.findByIsin(p.isin()).orElseThrow());
         }
 
-        // Map ISIN -> historical monthly return series (approx. last 10 years)
-        // Note: Instrument name holds the symbol in our setup
-        Map<String, List<Double>> returnsByIsin = new HashMap<>();
-        for (Map.Entry<String, Instrument> e : instrumentMap.entrySet()) {
-            returnsByIsin.put(e.getKey(), marketProvider.getMonthlyReturnsForSymbol(e.getValue().getName()));
-        }
-
         // Portfolio time series for the aggregate values (total, contributed, dividends)
         List<TimePoint> portfolio = new ArrayList<>(months + 1);
 
@@ -49,9 +42,8 @@ public class SimulationService {
         Map<String, Double> unitsHeld = new HashMap<>();
         // Current price for each instrument (evolves during the loop)
         Map<String, Double> prices = new HashMap<>();
-        // For DISTRIBUTING instruments: track dividends generated within the current year (reset at year-end)
+        // Legacy holders for dividend attribution (no longer added to value to avoid double counting with ACGR)
         Map<String, Double> pendingYearDivByIsin = new HashMap<>();
-        // Cash attributed back to each instrument at year-end (sum of prior year distributions)
         Map<String, Double> attributedDivCashByIsin = new HashMap<>();
 
         // Initialize units from user-provided quantities and seed prices with current market prices
@@ -85,33 +77,56 @@ public class SimulationService {
             perInstrumentPoints.get(isin).add(new InstrumentSeriesPoint(0, unitsHeld.get(isin) * prices.get(isin)));
         }
 
+        // Nominal monthly return from ACGR (deterministic growth path per instrument)
+        Map<String, Double> monthlyNominalReturnByIsin = new HashMap<>();
+        for (Map.Entry<String, Instrument> e : instrumentMap.entrySet()) {
+            Instrument inst = e.getValue();
+            double monthlyNominal = Math.pow(1.0 + inst.getAcgr10(), 1.0 / 12.0) - 1.0;
+            monthlyNominalReturnByIsin.put(e.getKey(), monthlyNominal);
+        }
+
+        // If real-terms simulation is requested, convert monthly nominal returns to real by removing inflation
+        // Determine REAL vs NOMINAL simulation behavior. In REAL mode, apply real monthly returns.
+        boolean realTerms = false;
+        double monthlyInflation = 0.0;
+        try {
+            realTerms = req.realTerms();
+            monthlyInflation = Math.pow(1.0 + req.inflationAnnual(), 1.0 / 12.0) - 1.0;
+        } catch (Throwable ignored) {}
+
         for (int m = 1; m <= months; m++) {
             double monthlyDividendsGeneratedTotal = 0.0;
-            // Evolve prices monthly using historical monthly returns to avoid linear paths.
-            // We still apply monthly fee factor on top of the realized return.
+            // Evolve prices monthly using ACGR-derived monthly returns + fees.
             for (Map.Entry<String, Instrument> e : instrumentMap.entrySet()) {
                 String isin = e.getKey();
                 Instrument inst = e.getValue();
 
-                List<Double> series = returnsByIsin.get(isin);
-                double histMonthly = series.get((m - 1) % series.size());
                 double monthlyFee = Math.pow(1.0 - annualFees, 1.0 / 12.0) - 1.0; // negative
-
-                double newPrice = prices.get(isin) * (1.0 + histMonthly) * (1.0 + monthlyFee);
+                double monthlyNominal = monthlyNominalReturnByIsin.get(isin);
+                // Convert to real monthly return if requested
+                double monthlyEffective = realTerms
+                        ? ((1.0 + monthlyNominal) / (1.0 + monthlyInflation)) - 1.0
+                        : monthlyNominal;
+                double newPrice = prices.get(isin) * (1.0 + monthlyEffective) * (1.0 + monthlyFee);
 
                 // Dividends: distribute annual dividend yield evenly per month for a simple approximation
-                double monthlyDividendYield = inst.getDividendYieldAnnual() / 12.0;
+                // If an instrument is ACCUMULATING and reports ~0 dividend yield (common for accumulating share classes),
+                // we apply a conservative fallback yield (1.5%/yr) purely to expose the amount that is implicitly
+                // generated and reinvested. This keeps yearly dividend bars visible even when everything is accumulating.
+                double annualYield = inst.getDividendYieldAnnual();
+                if (annualYield <= 0.0 && inst.getDividendPolicy() == DividendPolicy.ACCUMULATING) {
+                    annualYield = 0.015; // 1.5% fallback for accumulating instruments lacking a reported yield
+                }
+                double monthlyDividendYield = annualYield / 12.0;
                 double dividendAmountPerUnit = prices.get(isin) * monthlyDividendYield;
                 double monthlyDivForInstrument = unitsHeld.get(isin) * dividendAmountPerUnit;
 
                 if (inst.getDividendPolicy() == DividendPolicy.ACCUMULATING) {
-                    // ACCUMULATING: reinvest dividends into additional units at the new price
-                    double unitsFromDividend = monthlyDivForInstrument / newPrice;
-                    unitsHeld.put(isin, unitsHeld.get(isin) + unitsFromDividend);
+                    // Do not reinvest into additional units: ACGR already reflects total return including dividends.
                 } else {
-                    // DISTRIBUTING: track dividends as cash paid out (not reinvested)
+                    // DISTRIBUTING: track dividends as paid for reporting, but do not add to instrument value.
                     dividendsPaidCumulative += monthlyDivForInstrument;
-                    // accumulate within the current year for this instrument; added to instrument value at year-end
+                    // Keep yearly sum for bar display only (not added to value)
                     pendingYearDivByIsin.put(isin, pendingYearDivByIsin.get(isin) + monthlyDivForInstrument);
                 }
 
@@ -121,18 +136,10 @@ public class SimulationService {
                 prices.put(isin, newPrice);
             }
 
-            // At each year boundary, attribute the year's paid dividends back to each DISTRIBUTING instrument's displayed value
+            // Year boundary: reset yearly tracking (bars only). We do not attribute to value to avoid double counting.
             if (m % 12 == 0) {
-                for (Map.Entry<String, Instrument> e : instrumentMap.entrySet()) {
-                    String isin = e.getKey();
-                    Instrument inst = e.getValue();
-                    if (inst.getDividendPolicy() == DividendPolicy.DISTRIBUTING) {
-                        double add = pendingYearDivByIsin.getOrDefault(isin, 0.0);
-                        if (add != 0.0) {
-                            attributedDivCashByIsin.put(isin, attributedDivCashByIsin.get(isin) + add);
-                            pendingYearDivByIsin.put(isin, 0.0);
-                        }
-                    }
+                for (String isin : pendingYearDivByIsin.keySet()) {
+                    pendingYearDivByIsin.put(isin, 0.0);
                 }
             }
 
@@ -161,13 +168,12 @@ public class SimulationService {
                 }
             }
 
-            // Total value = holdings + side capital + attributed dividend cash (added yearly to each distributing instrument)
-            double totalValue = totalPortfolioValue(unitsHeld, prices) + req.sideCapital() + sumValues(attributedDivCashByIsin);
+            // Total value = holdings + side capital (no dividend cash attribution; ACGR already includes dividends)
+            double totalValue = totalPortfolioValue(unitsHeld, prices) + req.sideCapital();
             portfolio.add(new TimePoint(m, totalValue, contributed, dividendsPaidCumulative, monthlyDividendsGeneratedTotal));
             for (String isin : perInstrumentPoints.keySet()) {
                 double base = unitsHeld.get(isin) * prices.get(isin);
-                double withAttributedDiv = base + attributedDivCashByIsin.getOrDefault(isin, 0.0);
-                perInstrumentPoints.get(isin).add(new InstrumentSeriesPoint(m, withAttributedDiv));
+                perInstrumentPoints.get(isin).add(new InstrumentSeriesPoint(m, base));
             }
         }
 
@@ -200,11 +206,7 @@ public class SimulationService {
         return v;
     }
 
-    private static double sumValues(Map<String, Double> map) {
-        double s = 0.0;
-        for (double v : map.values()) s += v;
-        return s;
-    }
+    // sumValues retained for potential future use (e.g., when attributing dividend cash)
 }
 
 

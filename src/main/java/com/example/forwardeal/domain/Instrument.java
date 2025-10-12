@@ -7,7 +7,8 @@ package com.example.forwardeal.domain;
  * - a human-readable name (as supplied by the data provider),
  * - a current market price (used to value existing holdings at t=0),
  * - an estimated total annual return rate (used to evolve price in the simulator),
- * - an annual dividend yield (portion of total return paid out as dividends), and
+ * - an annual dividend yield (portion of total return paid out as dividends),
+ * - an annual expense ratio (management fees charged by the fund as a fraction), and
  * - a dividend policy (ACCUMULATING or DISTRIBUTING) guiding dividend treatment.
  */
 public class Instrument {
@@ -21,18 +22,21 @@ public class Instrument {
     private final double totalAnnualReturnRate; // kept for backward-compat; represents ACGR10
     // Expected annual dividend yield (e.g., 0.02 for 2%); split equally across months in simulator
     private final double dividendYieldAnnual;   // portion of total return paid as dividends, e.g., 0.02
+    // Annual total expense ratio (management fees) as decimal (e.g., 0.002 for 20 bps)
+    private final double expenseRatioAnnual;
     // Policy: ACCUMULATING => reinvest dividends; DISTRIBUTING => pay cash out
     private final DividendPolicy dividendPolicy;
 
     /**
      * Construct a fully-initialized instrument. All fields are required and immutable.
      */
-    public Instrument(String isin, String name, double currentPrice, double totalAnnualReturnRate, double dividendYieldAnnual, DividendPolicy dividendPolicy) {
+    public Instrument(String isin, String name, double currentPrice, double totalAnnualReturnRate, double dividendYieldAnnual, double expenseRatioAnnual, DividendPolicy dividendPolicy) {
         this.isin = isin;
         this.name = name;
         this.currentPrice = currentPrice;
         this.totalAnnualReturnRate = totalAnnualReturnRate;
         this.dividendYieldAnnual = dividendYieldAnnual;
+        this.expenseRatioAnnual = expenseRatioAnnual;
         this.dividendPolicy = dividendPolicy;
     }
 
@@ -64,6 +68,11 @@ public class Instrument {
     /** @return expected annual dividend yield (as decimal) */
     public double getDividendYieldAnnual() {
         return dividendYieldAnnual;
+    }
+
+    /** @return annual expense ratio (as decimal), e.g., 0.002 for 20 bps */
+    public double getExpenseRatioAnnual() {
+        return expenseRatioAnnual;
     }
 
     /** @return dividend policy determining how dividends are handled in the simulation */

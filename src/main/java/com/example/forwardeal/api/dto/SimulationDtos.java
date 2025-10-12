@@ -25,7 +25,9 @@ public class SimulationDtos {
             @PositiveOrZero double sideCapital,
             @Positive int years,
             @Valid DcaSchedule dca,
-            @PositiveOrZero double feesAnnualBps // 0-10000 bps
+            @PositiveOrZero double feesAnnualBps, // 0-10000 bps
+            boolean realTerms,                    // if true, use real (inflation-adjusted) returns for instruments
+            @PositiveOrZero double inflationAnnual // e.g., 0.03 for 3% FR inflation
     ) {}
 
     // Aggregate portfolio point at a given month

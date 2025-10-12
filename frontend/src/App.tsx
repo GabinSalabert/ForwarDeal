@@ -10,6 +10,7 @@ type Instrument = {
   totalAnnualReturnRate: number // ACGR10 from backend
   acgr10?: number
   dividendYieldAnnual: number
+  expenseRatioAnnual?: number
   dividendPolicy: 'ACCUMULATING' | 'DISTRIBUTING'
 }
 
@@ -61,18 +62,34 @@ export default function App() {
   const [result, setResult] = useState<SimulationResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
+  const [showReal, setShowReal] = useState(false)
+  const [inflation, setInflation] = useState(0.03)
+  const [sortMode, setSortMode] = useState<'ALPHA' | 'ACGR'>('ALPHA')
 
   // Fetch instruments once on mount
   useEffect(() => {
     fetch(`${API_BASE}/instruments`).then(r => r.json()).then(setInstruments).catch(() => setInstruments([]))
   }, [])
 
+  // Filter + sort instruments for display
+  const visibleInstruments = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const filtered = instruments.filter(i => {
+      if (!q) return true
+      return i.name.toLowerCase().includes(q) || i.isin.toLowerCase().includes(q)
+    })
+    const byAlpha = (a: Instrument, b: Instrument) => a.name.localeCompare(b.name)
+    const toAcgr = (i: Instrument) => (i.acgr10 ?? i.totalAnnualReturnRate ?? 0)
+    const byAcgrDesc = (a: Instrument, b: Instrument) => (toAcgr(b) - toAcgr(a)) || byAlpha(a, b)
+    return [...filtered].sort(sortMode === 'ACGR' ? byAcgrDesc : byAlpha)
+  }, [instruments, query, sortMode])
+
   // Add an instrument to the basket if not already present
   const onAdd = (isin: string) => {
     setBasket(prev => {
       const found = prev.find(p => p.isin === isin)
       if (found) return prev
-      return [...prev, { isin, quantity: 1 }]
+      return [...prev, { isin, quantity: 0 }]
     })
   }
 
@@ -90,6 +107,29 @@ export default function App() {
   const basketMarketValue = useMemo(() => {
     return basket.reduce((sum, p) => sum + (instruments.find(i => i.isin === p.isin)?.currentPrice ?? 0) * p.quantity, 0)
   }, [basket, instruments])
+
+  // Auto-compute fees (bps) from basket instruments' expense ratios
+  const autoFeesBps = useMemo(() => {
+    if (basket.length === 0) return 0
+    const items = basket.map(p => {
+      const ins = instruments.find(i => i.isin === p.isin)
+      const price = ins?.currentPrice ?? 0
+      const value = price * p.quantity
+      const er = ins?.expenseRatioAnnual ?? 0
+      return { value, er }
+    })
+    const totalVal = items.reduce((s, it) => s + it.value, 0)
+    if (totalVal > 0) {
+      const weightedEr = items.reduce((s, it) => s + it.er * it.value, 0) / totalVal
+      return Math.round(weightedEr * 10000)
+    }
+    const ers = basket.map(p => instruments.find(i => i.isin === p.isin)?.expenseRatioAnnual ?? 0)
+    const avgEr = ers.length ? (ers.reduce((s, e) => s + e, 0) / ers.length) : 0
+    return Math.round(avgEr * 10000)
+  }, [basket, instruments])
+
+  // Keep fees field in sync with auto-computed value
+  useEffect(() => { setFeesBps(autoFeesBps) }, [autoFeesBps])
 
   // Total initial (for display): basket market value + side capital
   const totalInitial = useMemo(() => basketMarketValue + sideCapital, [basketMarketValue, sideCapital])
@@ -109,9 +149,8 @@ export default function App() {
       // also include each instrument series so stacking still works
       ...Object.fromEntries(result.instruments.map(s => [s.isin, s.points[p.monthIndex]?.value ?? 0]))
     })) as ChartRow[]
-    // Compute real purchasing power of a pure-cash DCA (0% nominal) under French inflation
-    // Approach: degrade previous real value by monthly inflation, then add this month's DCA delta
-    const annualInflation = 0.04 // approx. current FR inflation; adjust as needed
+    // Compute cash as pure accumulation: side capital + contributions (no interest, no inflation)
+    const annualInflation = inflation
     const monthlyInflFactor = Math.pow(1 + annualInflation, 1 / 12)
     let realCash = sideCapital
     let prevContrib = result.portfolio[0]?.contributed ?? 0
@@ -121,10 +160,17 @@ export default function App() {
       if (idx === 0) {
         base[idx].cashReal = sideCapital
       } else {
-        realCash = realCash / monthlyInflFactor + deltaContrib
-        base[idx].cashReal = realCash
+        realCash = realCash + deltaContrib
+        base[idx].cashReal = showReal ? realCash / Math.pow(monthlyInflFactor, idx) : realCash
       }
       prevContrib = p.contributed
+    }
+    // Optional real-terms view: deflate basket totals by cumulative inflation (cash handled above; contributed stays nominal)
+    if (showReal) {
+      for (let idx = 0; idx < base.length; idx++) {
+        const cf = Math.pow(monthlyInflFactor, idx)
+        base[idx].total = base[idx].total / cf
+      }
     }
     const lastMonth = result.portfolio[result.portfolio.length - 1]?.monthIndex ?? 0
     const yrs = Math.floor(lastMonth / 12)
@@ -140,7 +186,7 @@ export default function App() {
       if (base[end]) base[end].yearlyDivs = sum
     }
     return base
-  }, [result, sideCapital])
+  }, [result, sideCapital, showReal])
 
   // Currency formatter for axes/tooltip labels (compact, modern)
   const fmt = useMemo(() => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }), [])
@@ -150,7 +196,7 @@ export default function App() {
     if (!canSimulate) return
     setLoading(true)
     try {
-      const body: SimulationRequest = { positions: basket, initialCapital: basketMarketValue, sideCapital, years, dca, feesAnnualBps: feesBps }
+      const body: any = { positions: basket, initialCapital: basketMarketValue, sideCapital, years, dca, feesAnnualBps: feesBps, realTerms: showReal, inflationAnnual: inflation }
       const res = await fetch(`${API_BASE}/simulations`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       })
@@ -179,17 +225,30 @@ export default function App() {
               />
               <svg className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
             </div>
+            {/* Sort controls */}
+            <div className="mb-3 flex gap-2">
+              <button
+                onClick={() => setSortMode('ALPHA')}
+                className={`px-3 py-1.5 text-xs rounded-full border transition ${sortMode === 'ALPHA' ? 'bg-indigo-500 text-white border-indigo-400' : 'bg-slate-800/70 text-slate-200 border-slate-700 hover:bg-slate-700/60'}`}
+                title="Trier par ordre alphabétique"
+              >
+                A → Z
+              </button>
+              <button
+                onClick={() => setSortMode('ACGR')}
+                className={`px-3 py-1.5 text-xs rounded-full border transition ${sortMode === 'ACGR' ? 'bg-indigo-500 text-white border-indigo-400' : 'bg-slate-800/70 text-slate-200 border-slate-700 hover:bg-slate-700/60'}`}
+                title="Trier par ACGR (décroissant)"
+              >
+                ACGR
+              </button>
+            </div>
             <div className="max-h-80 overflow-auto custom-scroll divide-y divide-slate-800 pr-3">
-              {instruments.filter(i => {
-                const q = query.trim().toLowerCase()
-                if (!q) return true
-                return i.name.toLowerCase().includes(q) || i.isin.toLowerCase().includes(q)
-              }).map(i => (
+              {visibleInstruments.map(i => (
                 <div key={i.isin} className="py-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="font-medium text-slate-100">{i.name}</div>
-                      <div className="text-xs text-slate-400">{i.isin} • Price {i.currentPrice?.toFixed(2)} • ACGR {( (i.acgr10 ?? i.totalAnnualReturnRate) * 100).toFixed(1)}% • Div {(i.dividendYieldAnnual*100).toFixed(1)}% • {i.dividendPolicy}</div>
+                      <div className="text-xs text-slate-400">{i.isin} • Price {i.currentPrice?.toFixed(2)} • ACGR {((i.acgr10 ?? i.totalAnnualReturnRate) * 100).toFixed(1)}% • Div {(i.dividendYieldAnnual*100).toFixed(1)}% • Fees {(((i.expenseRatioAnnual ?? 0)*100)).toFixed(2)}% • {i.dividendPolicy}</div>
                     </div>
                   </div>
                   {/* Second line to give space for the button, away from scrollbar */}
@@ -235,8 +294,14 @@ export default function App() {
                 <input type="number" value={years} onChange={e => setYears(Number(e.target.value))} className="w-full border border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-sm text-slate-300">Fees (bps/yr)</span>
-                <input type="number" value={feesBps} onChange={e => setFeesBps(Number(e.target.value))} className="w-full border border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                <span className="text-sm text-slate-300">Fees (%/yr)</span>
+                <input
+                  type="number"
+                  step={0.01}
+                  value={Number((feesBps / 100).toFixed(2))}
+                  onChange={e => setFeesBps(Number(e.target.value) * 100)}
+                  className="w-full border border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-sm text-slate-300">Side capital (Cash)</span>
@@ -273,7 +338,22 @@ export default function App() {
 
         {/* RIGHT PANE: chart (fills viewport height) */}
         <div className="xl:h-[calc(100vh-3rem)] bg-slate-900/70 backdrop-blur rounded-xl shadow-sm ring-1 ring-slate-700/50 p-4">
-          <h2 className="font-semibold text-lg mb-2 text-slate-50">Evolution</h2>
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="font-semibold text-lg text-slate-50">Evolution</h2>
+            {/* Modern toggle to switch NOMINAL vs REAL (FR inflation) */}
+            <button
+              onClick={() => setShowReal(v => !v)}
+              className={`relative inline-flex h-8 w-[220px] items-center rounded-full transition ${showReal ? 'bg-indigo-500/90' : 'bg-slate-700/70'}`}
+              title="Basculer NOMINAL / REAL (inflation FR)"
+            >
+              <span
+                className={`absolute left-1 top-1 h-6 w-6 rounded-full bg-white transition-transform ${showReal ? 'translate-x-[184px]' : 'translate-x-0'}`}
+              />
+              <span className="w-full text-center text-xs font-medium text-slate-100">
+                {showReal ? 'REAL' : 'NOMINAL'}
+              </span>
+            </button>
+          </div>
           {!result && <div className="text-sm text-slate-400">Run a simulation to see results.</div>}
           {result && (
             <div className="h-[calc(100%-1.75rem)]">

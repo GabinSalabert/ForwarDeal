@@ -31,6 +31,7 @@ public class InstrumentRepository {
                     d.getCurrentPrice(),
                     d.getAnnualReturnRate(),
                     d.getDividendYieldAnnual(),
+                    d.getExpenseRatioAnnual(),
                     d.getDividendPolicy()
             );
             instrumentsByIsin.put(inst.getIsin(), inst);

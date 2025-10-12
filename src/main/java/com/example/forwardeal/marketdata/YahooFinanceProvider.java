@@ -60,7 +60,8 @@ public class YahooFinanceProvider implements MarketDataProvider {
                         }
                         double yield = defaultYieldForSymbol(item.symbol());
                         DividendPolicy policy = yield > 0.0001 ? DividendPolicy.DISTRIBUTING : DividendPolicy.ACCUMULATING;
-                        return new MarketInstrumentData(item.isin(), item.name(), item.symbol(), 1.0, est, yield, policy);
+                        double er = defaultExpenseRatio(item.symbol(), item.name());
+                        return new MarketInstrumentData(item.isin(), item.name(), item.symbol(), 1.0, est, yield, er, policy);
                     }
                 });
             }
@@ -87,16 +88,19 @@ public class YahooFinanceProvider implements MarketDataProvider {
         double price = fetchCurrentPrice(symbol);
         double tenYearCagr = computeTenYearCagrFromMonthly(symbol);
         if (!Double.isFinite(tenYearCagr)) tenYearCagr = estimateTenYearCagr(symbol);
-        // If we still have an indeterminate/default value and a curated hint exists, prefer the hint
+        // Use curated hint when online data is missing, clearly default-like, or implausible
         if (acgrHint != null && acgrHint > -0.5 && acgrHint < 1.0) {
-            if (!Double.isFinite(tenYearCagr) || Math.abs(tenYearCagr - 0.06) < 1e-6) {
+            boolean defaultLike = Math.abs(tenYearCagr - 0.06) < 1e-6;
+            boolean implausible = !Double.isFinite(tenYearCagr) || tenYearCagr < -0.2 || tenYearCagr > 0.25;
+            boolean farOff = Double.isFinite(tenYearCagr) && Math.abs(tenYearCagr - acgrHint) > 0.20;
+            if (defaultLike || implausible || farOff) {
                 tenYearCagr = acgrHint;
             }
         }
-        // Clamp to a reasonable range
+        // Final clamp to conservative bounds
         if (Double.isFinite(tenYearCagr)) {
             if (tenYearCagr < -0.5) tenYearCagr = -0.5;
-            if (tenYearCagr > 1.0) tenYearCagr = 1.0;
+            if (tenYearCagr > 0.4) tenYearCagr = 0.4; // cap at 40% to avoid outliers like 100%
         } else {
             tenYearCagr = (acgrHint != null) ? acgrHint : 0.06;
         }
@@ -107,9 +111,13 @@ public class YahooFinanceProvider implements MarketDataProvider {
         } catch (Exception ignored) {
             dividendYield = defaultYieldForSymbol(symbol);
         }
+        double expenseRatio = fetchExpenseRatio(symbol);
+        if (!Double.isFinite(expenseRatio) || expenseRatio < 0) {
+            expenseRatio = defaultExpenseRatio(symbol, displayName);
+        }
         DividendPolicy policy = dividendYield > 0.0001 ? DividendPolicy.DISTRIBUTING : DividendPolicy.ACCUMULATING;
         String name = (displayName == null || displayName.isBlank()) ? symbol : displayName;
-        return new MarketInstrumentData(isin, name, symbol, price, tenYearCagr, dividendYield, policy);
+        return new MarketInstrumentData(isin, name, symbol, price, tenYearCagr, dividendYield, expenseRatio, policy);
     }
 
     private String fetchDisplayName(String symbol) {
@@ -539,6 +547,56 @@ public class YahooFinanceProvider implements MarketDataProvider {
         } catch (Exception ignored) {}
         // Fallback to a conservative default when blocked
         return defaultYieldForSymbol(symbol);
+    }
+
+    private double fetchExpenseRatio(String symbol) {
+        try {
+            String url = "https://query1.finance.yahoo.com/v10/finance/quoteSummary/" + symbol + "?modules=fundProfile,defaultKeyStatistics,summaryDetail";
+            var resp = http.get().uri(url).retrieve().body(Map.class);
+            Map<?,?> qs = (Map<?,?>) resp.get("quoteSummary");
+            List<Map<?,?>> results = qs != null ? (List<Map<?,?>>) qs.get("result") : null;
+            Map<?,?> root = (results != null && !results.isEmpty()) ? results.get(0) : null;
+            if (root != null) {
+                try {
+                    Map<?,?> fundProfile = (Map<?,?>) root.get("fundProfile");
+                    if (fundProfile != null) {
+                        Map<?,?> fees = (Map<?,?>) fundProfile.get("feesExpensesInvestment");
+                        if (fees != null) {
+                            Map<?,?> arr = (Map<?,?>) fees.get("annualReportExpenseRatio");
+                            Object raw = arr != null ? arr.get("raw") : null;
+                            if (raw instanceof Number n) return n.doubleValue();
+                        }
+                    }
+                } catch (Exception ignored) {}
+                try {
+                    Map<?,?> stats = (Map<?,?>) root.get("defaultKeyStatistics");
+                    if (stats != null) {
+                        Map<?,?> er = (Map<?,?>) stats.get("expenseRatio");
+                        Object raw = er != null ? er.get("raw") : null;
+                        if (raw instanceof Number n) return n.doubleValue();
+                    }
+                } catch (Exception ignored) {}
+                try {
+                    Map<?,?> sd = (Map<?,?>) root.get("summaryDetail");
+                    if (sd != null) {
+                        Map<?,?> er = (Map<?,?>) sd.get("expenseRatio");
+                        Object raw = er != null ? er.get("raw") : null;
+                        if (raw instanceof Number n) return n.doubleValue();
+                    }
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+        return Double.NaN;
+    }
+
+    private double defaultExpenseRatio(String symbol, String displayName) {
+        String name = displayName != null ? displayName : symbol;
+        String upper = name.toUpperCase(Locale.ROOT);
+        // Heuristic: ETFs typically charge around 5–30 bps; stocks ~0.
+        if (upper.contains("ETF") || upper.contains("UCITS") || upper.contains("INDEX") || symbol.equals(symbol.toUpperCase(Locale.ROOT)) && symbol.length() >= 3) {
+            return 0.002; // 20 bps default for funds/ETFs
+        }
+        return 0.0; // stocks
     }
 
     private double defaultYieldForSymbol(String symbol) {

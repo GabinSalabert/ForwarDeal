@@ -19,6 +19,8 @@ public class MarketInstrumentData {
     private final double annualReturnRate; // ACGR10
     // Estimated annual dividend yield (as decimal)
     private final double dividendYieldAnnual;
+    // Annual expense ratio (TER) as decimal (e.g., 0.002 for 20 bps)
+    private final double expenseRatioAnnual;
     // Dividend policy inferred from yield or known fund/share class policy
     private final DividendPolicy dividendPolicy;
 
@@ -28,6 +30,7 @@ public class MarketInstrumentData {
                                 double currentPrice,
                                 double annualReturnRate,
                                 double dividendYieldAnnual,
+                                double expenseRatioAnnual,
                                 DividendPolicy dividendPolicy) {
         this.isin = isin;
         this.name = name;
@@ -35,6 +38,7 @@ public class MarketInstrumentData {
         this.currentPrice = currentPrice;
         this.annualReturnRate = annualReturnRate;
         this.dividendYieldAnnual = dividendYieldAnnual;
+        this.expenseRatioAnnual = expenseRatioAnnual;
         this.dividendPolicy = dividendPolicy;
     }
 
@@ -45,6 +49,7 @@ public class MarketInstrumentData {
     public double getAnnualReturnRate() { return annualReturnRate; }
     public double getAcgr10() { return annualReturnRate; }
     public double getDividendYieldAnnual() { return dividendYieldAnnual; }
+    public double getExpenseRatioAnnual() { return expenseRatioAnnual; }
     public DividendPolicy getDividendPolicy() { return dividendPolicy; }
 }
 
