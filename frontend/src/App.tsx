@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 // Recharts components for responsive area chart visualization
 import { Area, ComposedChart, Bar, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis, LabelList } from 'recharts'
+import html2canvas from 'html2canvas'
+import jsPDF from 'jspdf'
 
 // Instrument as returned by backend API
 type Instrument = {
@@ -65,6 +67,10 @@ export default function App() {
   const [showReal, setShowReal] = useState(false)
   const [inflation, setInflation] = useState(0.03)
   const [sortMode, setSortMode] = useState<'ALPHA' | 'ACGR'>('ALPHA')
+  const chartRef = useRef<HTMLDivElement | null>(null)
+  const pdfNominalRef = useRef<HTMLDivElement | null>(null)
+  const pdfRealRef = useRef<HTMLDivElement | null>(null)
+  const [activeTab, setActiveTab] = useState<'chart' | 'data'>('chart')
 
   // Fetch instruments once on mount
   useEffect(() => {
@@ -190,6 +196,8 @@ export default function App() {
 
   // Currency formatter for axes/tooltip labels (compact, modern)
   const fmt = useMemo(() => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }), [])
+  const fmtPct = useMemo(() => new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 2 }), [])
+  const fmtCur = useMemo(() => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }), [])
 
   // Submit the simulation request to the backend and store the response
   const simulate = async () => {
@@ -205,6 +213,115 @@ export default function App() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // Export a styled, modern PDF with key KPIs and per-instrument yearly evolution
+  const downloadPdf = async () => {
+    if (!result) return
+    // Snapshot chart
+    const container = chartRef.current
+    let chartImg: string | null = null
+    if (container) {
+      const canvas = await html2canvas(container, { backgroundColor: '#0b1220', scale: 2 })
+      chartImg = canvas.toDataURL('image/png')
+    }
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
+    const pageW = doc.internal.pageSize.getWidth()
+    const pageH = doc.internal.pageSize.getHeight()
+    const margin = 36
+    let y = margin
+
+    // Header
+    doc.setFillColor(17, 24, 39) // slate-900
+    doc.setTextColor(255, 255, 255)
+    doc.roundedRect(margin, y, pageW - margin * 2, 40, 8, 8, 'F')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(16)
+    doc.text('Forwardeal — Simulation Report', margin + 16, y + 26)
+    y += 56
+
+    // Helpers to avoid locale Unicode separators that some PDF fonts misrender
+    const formatPdfNumber = (n: number) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Math.round(n))
+    const formatPdfCurrency = (n: number) => `${formatPdfNumber(n)} EUR`
+
+    // KPI cards: Initial capital (basket), Final capital, Period
+    const finalTotal = result.portfolio[result.portfolio.length - 1]?.totalValue ?? 0
+    const kpiW = (pageW - margin * 2 - 24) / 3
+    const kpiH = 72
+    const kpiTitles = ['Initial capital', 'Final capital', 'Period']
+    const kpiValues = [formatPdfCurrency(basketMarketValue), formatPdfCurrency(finalTotal), `${years} years`]
+    for (let i = 0; i < 3; i++) {
+      const x = margin + i * (kpiW + 12)
+      doc.setFillColor(241, 245, 249) // slate-100
+      doc.roundedRect(x, y, kpiW, kpiH, 10, 10, 'F')
+      doc.setTextColor(51, 65, 85) // slate-700
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(11)
+      doc.text(kpiTitles[i], x + 14, y + 22)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(16)
+      // Avoid exotic separators; using en-US already yields commas
+      doc.text(kpiValues[i], x + 14, y + 46)
+    }
+    y += kpiH + 20
+
+    // Chart image (styled)
+    if (chartImg) {
+      const imgW = pageW - margin * 2
+      const imgH = imgW * 0.45
+      if (y + imgH > pageH - margin) { doc.addPage(); y = margin }
+      doc.roundedRect(margin - 4, y - 4, imgW + 8, imgH + 8, 8, 8, 'S')
+      doc.addImage(chartImg, 'PNG', margin, y, imgW, imgH, undefined, 'FAST')
+      y += imgH + 16
+    }
+
+    // Styled HTML content snapshot: Basket table + Per-instrument yearly evolution tables
+    const addHtmlBlock = async (ref: React.RefObject<HTMLDivElement>) => {
+      const block = ref.current
+      if (!block) return
+      const blockCanvas = await html2canvas(block, { scale: 2, backgroundColor: '#ffffff' })
+      const imgW = pageW - margin * 2
+      const scale = imgW / blockCanvas.width
+      const firstAvailablePts = pageH - margin - y
+      const pageAvailablePts = pageH - margin * 2
+      let pxY = 0
+      let first = true
+      while (pxY < blockCanvas.height) {
+        const availablePts = first ? firstAvailablePts : pageAvailablePts
+        const availablePx = Math.max(50, Math.floor(availablePts / scale))
+        const slicePx = Math.min(availablePx, blockCanvas.height - pxY)
+        const sliceCanvas = document.createElement('canvas')
+        sliceCanvas.width = blockCanvas.width
+        sliceCanvas.height = slicePx
+        const ctx = sliceCanvas.getContext('2d')!
+        ctx.drawImage(blockCanvas, 0, pxY, blockCanvas.width, slicePx, 0, 0, blockCanvas.width, slicePx)
+        const sliceImg = sliceCanvas.toDataURL('image/png')
+        const slicePts = slicePx * scale
+        const drawY = first ? y : margin
+        if (!first) doc.addPage()
+        doc.addImage(sliceImg, 'PNG', margin, drawY, imgW, slicePts, undefined, 'FAST')
+        pxY += slicePx
+        first = false
+      }
+      y = margin
+    }
+
+    // Nominal tables
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(12)
+    doc.text('Nominal (tables)', margin, y)
+    y += 14
+    await addHtmlBlock(pdfNominalRef)
+
+    // Real tables
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(12)
+    doc.text('Real (tables, FR inflation deflated)', margin, y)
+    y += 14
+    await addHtmlBlock(pdfRealRef)
+
+    doc.save(`forwardeal-report-${Date.now()}.pdf`)
   }
 
   return (
@@ -340,26 +457,58 @@ export default function App() {
         <div className="xl:h-[calc(100vh-3rem)] bg-slate-900/70 backdrop-blur rounded-xl shadow-sm ring-1 ring-slate-700/50 p-4">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="font-semibold text-lg text-slate-50">Evolution</h2>
-            {/* Modern toggle to switch NOMINAL vs REAL (FR inflation) */}
-            <button
-              onClick={() => setShowReal(v => !v)}
-              className={`relative inline-flex h-8 w-[220px] items-center rounded-full transition ${showReal ? 'bg-indigo-500/90' : 'bg-slate-700/70'}`}
-              title="Basculer NOMINAL / REAL (inflation FR)"
-            >
-              <span
-                className={`absolute left-1 top-1 h-6 w-6 rounded-full bg-white transition-transform ${showReal ? 'translate-x-[184px]' : 'translate-x-0'}`}
-              />
-              <span className="w-full text-center text-xs font-medium text-slate-100">
-                {showReal ? 'REAL' : 'NOMINAL'}
-              </span>
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Tabs: Chart | Data */}
+              <div className="flex items-center bg-slate-800/50 rounded-lg p-0.5 ring-1 ring-slate-700/60">
+                <button
+                  onClick={() => setActiveTab('chart')}
+                  className={`px-3 h-8 rounded-md text-xs font-medium transition ${activeTab === 'chart' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:text-white'}`}
+                >
+                  Chart
+                </button>
+                <button
+                  onClick={() => setActiveTab('data')}
+                  className={`px-3 h-8 rounded-md text-xs font-medium transition ${activeTab === 'data' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:text-white'}`}
+                >
+                  Data
+                </button>
+              </div>
+              {/* Small square PDF button */}
+              <button
+                onClick={downloadPdf}
+                title="Download PDF"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-700/70 text-slate-100 ring-1 ring-slate-600 hover:bg-slate-600 transition"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                  <path d="M14 2v6h6" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                  <path d="M7.5 16h2a1.5 1.5 0 0 0 0-3h-2v3z" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                  <path d="M12 13v3m0 0h1.5M12 16h1a1 1 0 0 0 0-2h-1" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M16 13h2m-2 3h2" stroke="currentColor" strokeWidth="1.5"/>
+                </svg>
+              </button>
+              {/* Modern toggle to switch NOMINAL vs REAL (FR inflation) */}
+              <button
+                onClick={() => setShowReal(v => !v)}
+                className={`relative inline-flex h-8 w-[220px] items-center rounded-full transition ${showReal ? 'bg-indigo-500/90' : 'bg-slate-700/70'}`}
+                title="Basculer NOMINAL / REAL (inflation FR)"
+              >
+                <span
+                  className={`absolute left-1 top-1 h-6 w-6 rounded-full bg-white transition-transform ${showReal ? 'translate-x-[184px]' : 'translate-x-0'}`}
+                />
+                <span className="w-full text-center text-xs font-medium text-slate-100">
+                  {showReal ? 'REAL' : 'NOMINAL'}
+                </span>
+              </button>
+            </div>
           </div>
           {!result && <div className="text-sm text-slate-400">Run a simulation to see results.</div>}
-          {result && (
-            <div className="h-[calc(100%-1.75rem)]">
-              <ResponsiveContainer width="100%" height="100%">
-                {/* Dual-axis chart: left for values, right for yearly dividends bars */}
-                <ComposedChart data={chartData} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+          {result && activeTab === 'chart' && (
+            <>
+              <div className="h-[calc(100%-3.5rem)]" ref={chartRef}>
+                <ResponsiveContainer width="100%" height="100%">
+                  {/* Dual-axis chart: left for values, right for yearly dividends bars */}
+                  <ComposedChart data={chartData} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
                   {/* Gradients for modern, subtle fills */}
                   <defs>
                     <linearGradient id="grad-total" x1="0" y1="0" x2="0" y2="1">
@@ -399,8 +548,183 @@ export default function App() {
                   <Bar yAxisId="right" dataKey="yearlyDivs" name="Yearly dividends (sum)" fill="url(#grad-bar)" barSize={16} radius={[6, 6, 0, 0]}>
                     <LabelList dataKey="yearlyDivs" position="top" formatter={(v: any) => fmt.format(Number(v))} fill="#c4b5fd" />
                   </Bar>
-                </ComposedChart>
-              </ResponsiveContainer>
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+              {/* Off-screen HTML blocks to be captured into the PDF as styled images */}
+              {/* NOMINAL */}
+              <div ref={pdfNominalRef} className="fixed -left-[9999px] top-0 w-[1060px] bg-white text-slate-800 p-6">
+                {/* Basket table */}
+                <div className="mb-6">
+                  <div className="text-sm font-semibold text-slate-700 mb-2">Basket</div>
+                  <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
+                    <thead className="bg-slate-100 text-slate-700">
+                      <tr>
+                        <th className="text-left px-3 py-2">Instrument</th>
+                        <th className="text-left px-3 py-2">ISIN</th>
+                        <th className="text-right px-3 py-2">Qty</th>
+                        <th className="text-right px-3 py-2">Price</th>
+                        <th className="text-right px-3 py-2">Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {basket.map(p => {
+                        const ins = instruments.find(i => i.isin === p.isin)
+                        const price = ins?.currentPrice ?? 0
+                        const val = price * p.quantity
+                        return (
+                          <tr key={p.isin} className="odd:bg-white even:bg-slate-50">
+                            <td className="px-3 py-2">{ins?.name ?? p.isin}</td>
+                            <td className="px-3 py-2 text-slate-600">{p.isin}</td>
+                            <td className="px-3 py-2 text-right">{p.quantity}</td>
+                            <td className="px-3 py-2 text-right">{fmtCur.format(price)}</td>
+                            <td className="px-3 py-2 text-right">{fmtCur.format(val)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {/* Per-instrument yearly evolution */}
+                <div className="space-y-6">
+                  {result.instruments.map(s => (
+                    <div key={s.isin}>
+                      <div className="text-sm font-semibold text-slate-700 mb-2">{s.name} <span className="text-slate-500 font-normal">({s.isin})</span></div>
+                      <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
+                        <thead className="bg-slate-100 text-slate-700">
+                          <tr>
+                            <th className="text-left px-3 py-2">Year</th>
+                            <th className="text-right px-3 py-2">Value</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Array.from({ length: years }).map((_, idx) => {
+                            const year = idx + 1
+                            const pointIdx = Math.min(year * 12, s.points.length - 1)
+                            const val = s.points[pointIdx]?.value ?? 0
+                            return (
+                              <tr key={year} className="odd:bg-white even:bg-slate-50">
+                                <td className="px-3 py-2">{year}</td>
+                                <td className="px-3 py-2 text-right">{fmtCur.format(val)}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* REAL (deflated) */}
+              <div ref={pdfRealRef} className="fixed -left-[9999px] top-0 w-[1060px] bg-white text-slate-800 p-6">
+                {/* Per-instrument yearly evolution (real) */}
+                <div className="space-y-6">
+                  {result.instruments.map(s => (
+                    <div key={s.isin}>
+                      <div className="text-sm font-semibold text-slate-700 mb-2">{s.name} <span className="text-slate-500 font-normal">({s.isin})</span> — Real</div>
+                      <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
+                        <thead className="bg-slate-100 text-slate-700">
+                          <tr>
+                            <th className="text-left px-3 py-2">Year</th>
+                            <th className="text-right px-3 py-2">Value (real)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Array.from({ length: years }).map((_, idx) => {
+                            const year = idx + 1
+                            const endIdx = Math.min(year * 12, s.points.length - 1)
+                            const inflMonthly = Math.pow(1 + inflation, 1 / 12)
+                            const endRaw = s.points[endIdx]?.value ?? 0
+                            const endReal = endRaw / Math.pow(inflMonthly, endIdx)
+                            return (
+                              <tr key={year} className="odd:bg-white even:bg-slate-50">
+                                <td className="px-3 py-2">{year}</td>
+                                <td className="px-3 py-2 text-right">{fmtCur.format(endReal)}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+          {result && activeTab === 'data' && (
+            <div className="h-[calc(100%-3.5rem)] overflow-y-auto custom-scroll space-y-6">
+              {result.instruments.map((s, idx) => {
+                const color = palette[idx % palette.length]
+                const start0 = s.points[0]?.value ?? 0
+                return (
+                  <div key={s.isin} className="rounded-xl ring-1 ring-slate-700/50 bg-slate-900/60 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
+                      <div className="text-sm font-semibold text-slate-100">{s.name}</div>
+                      <div className="text-xs text-slate-400">{s.isin}</div>
+                      <div className="ml-auto text-[11px] text-slate-400">ACGR {( (instruments.find(i=>i.isin===s.isin)?.acgr10 ?? instruments.find(i=>i.isin===s.isin)?.totalAnnualReturnRate ?? 0) * 100).toFixed(1)}% • Fees {( ((instruments.find(i=>i.isin===s.isin)?.expenseRatioAnnual ?? 0)*100) ).toFixed(2)}%</div>
+                    </div>
+                    <div className="overflow-x-auto overflow-y-hidden rounded-lg ring-1 ring-slate-700/50">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-slate-800/60 text-slate-300">
+                          <tr>
+                            <th className="text-left px-3 py-2">Year</th>
+                            <th className="text-right px-3 py-2">Start</th>
+                            <th className="text-right px-3 py-2">End</th>
+                            <th className="text-right px-3 py-2">Δ</th>
+                            <th className="text-right px-3 py-2">Δ%</th>
+                            <th className="text-right px-3 py-2">Min</th>
+                            <th className="text-right px-3 py-2">Max</th>
+                            <th className="text-right px-3 py-2">Max DD%</th>
+                            <th className="text-right px-3 py-2">CAGR‑to‑date</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                        {Array.from({ length: years }).map((_, yIdx) => {
+                            const year = yIdx + 1
+                          const startIdx = Math.min(yIdx * 12, s.points.length - 1)
+                          const endIdx = Math.min(year * 12, s.points.length - 1)
+                          const slice = s.points.slice(startIdx, endIdx + 1)
+                          const inflMonthly = Math.pow(1 + inflation, 1 / 12)
+                          const deflate = (val: number, mIdx: number) => val / Math.pow(inflMonthly, mIdx)
+                          const startRaw = s.points[startIdx]?.value ?? 0
+                          const endRaw = s.points[endIdx]?.value ?? 0
+                          const startV = showReal ? deflate(startRaw, startIdx) : startRaw
+                          const endV = showReal ? deflate(endRaw, endIdx) : endRaw
+                          const minV = slice.reduce((m, p, i) => {
+                            const v = showReal ? deflate(p.value, startIdx + i) : p.value
+                            return Math.min(m, v)
+                          }, Number.POSITIVE_INFINITY)
+                          const maxV = slice.reduce((m, p, i) => {
+                            const v = showReal ? deflate(p.value, startIdx + i) : p.value
+                            return Math.max(m, v)
+                          }, Number.NEGATIVE_INFINITY)
+                          const delta = endV - startV
+                          const deltaPct = startV > 0 ? delta / startV : 0
+                          const maxDDPct = maxV > 0 ? (minV - maxV) / maxV : 0 // negative value
+                          const yearsToDate = year
+                          const start0Adj = showReal ? deflate(start0, 0) : start0
+                          const cagrToDate = start0Adj > 0 && yearsToDate > 0 ? Math.pow(endV / start0Adj, 1 / yearsToDate) - 1 : 0
+                            return (
+                              <tr key={year} className={yIdx % 2 === 0 ? 'bg-slate-900/40' : 'bg-slate-900/20'}>
+                                <td className="px-3 py-2 text-slate-200">{year}</td>
+                                <td className="px-3 py-2 text-right text-slate-100">{fmtCur.format(startV)}</td>
+                                <td className="px-3 py-2 text-right text-slate-100">{fmtCur.format(endV)}</td>
+                                <td className={`px-3 py-2 text-right ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtCur.format(delta)}</td>
+                                <td className={`px-3 py-2 text-right ${deltaPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct.format(deltaPct)}</td>
+                                <td className="px-3 py-2 text-right text-slate-300">{fmtCur.format(minV)}</td>
+                                <td className="px-3 py-2 text-right text-slate-300">{fmtCur.format(maxV)}</td>
+                                <td className="px-3 py-2 text-right text-slate-300">{fmtPct.format(maxDDPct)}</td>
+                                <td className="px-3 py-2 text-right text-slate-300">{fmtPct.format(cagrToDate)}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
