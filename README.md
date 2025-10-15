@@ -162,3 +162,43 @@ docs/                                  # Documentation assets (add simulation-ex
 
 ## ⚖️ License
 MIT
+
+---
+
+## 🖥️ Desktop packaging (.exe) — How it works
+
+This project ships as a Spring Boot backend plus a React frontend. We can package both into a single desktop application for Windows using `jpackage` (Java 21+) and Maven.
+
+### What the .exe does
+- Starts an embedded Java runtime with your Spring Boot server (port 8080 by default).
+- The React frontend is prebuilt and copied into Spring’s `static/`, so it’s served directly by the backend at `http://localhost:8080/`.
+- You can create a desktop shortcut and a start menu entry with a custom icon.
+
+### Build steps (Windows)
+Prereqs: Java 21 with jpackage (included in recent JDKs), Maven, Node 18+
+
+1) Build the backend and frontend together
+```bash
+mvn -q -DskipTests package
+```
+This will:
+- run the frontend build (`frontend/` → `dist/`)
+- copy the `dist/` assets into `target/classes/static`
+- assemble a Spring Boot runnable jar at `target/forwardeal-<version>.jar`
+
+2) Produce the Windows installer (.exe) with jpackage
+```bash
+mvn -P windows -Dicon="path/to/icon.ico" org.panteleyev:jpackage-maven-plugin:jpackage
+```
+Outputs an installer under `target/jpackage/Forwardeal-<version>.exe`.
+
+3) Install & launch
+- Run the generated `.exe` and follow the wizard.
+- A “Forwardeal” shortcut will be added to the desktop/start menu.
+- Double‑click to launch. The app starts the backend and serves the UI at `http://localhost:8080/` in your default browser. You can pin the shortcut to the taskbar if you wish.
+
+### Notes & customization
+- Port: change the server port by editing the jpackage `jvmArgs` in `pom.xml` or by providing `-Dserver.port=XXXX`.
+- Icon: pass `-Dicon=...` to the jpackage command; must be `.ico` on Windows.
+- Auto‑open browser: you can create a small `startup.bat` that first starts the exe then opens the browser to `http://localhost:8080/` if you want the browser to pop automatically.
+- Mac/Linux: similar packaging is possible by changing the jpackage type (`dmg`, `pkg`, `deb`, `rpm`).
