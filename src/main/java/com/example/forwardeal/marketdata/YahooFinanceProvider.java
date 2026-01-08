@@ -298,6 +298,16 @@ public class YahooFinanceProvider implements MarketDataProvider {
         }
     }
 
+    /**
+     * Public method to get the EUR/USD exchange rate.
+     * Returns the rate as USD per EUR (e.g., 1.10 means 1 EUR = 1.10 USD).
+     * Returns 1.0 as fallback if the rate cannot be fetched.
+     */
+    public double getEurToUsdRate() {
+        double rate = fetchFxToUsdRate("EUR");
+        return Double.isFinite(rate) && rate > 0 ? rate : 1.0; // Fallback to 1:1 if unavailable
+    }
+
     // Public accessor used by the simulator to introduce realistic volatility
     public List<Double> getMonthlyReturnsForSymbol(String symbol) {
         if (symbol == null || symbol.isEmpty()) return defaultFlatMonthlyReturns();

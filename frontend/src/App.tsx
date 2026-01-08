@@ -67,14 +67,18 @@ export default function App() {
   const [showReal, setShowReal] = useState(false)
   const [inflation, setInflation] = useState(0.03)
   const [sortMode, setSortMode] = useState<'ALPHA' | 'ACGR'>('ALPHA')
+  const [usdToEur, setUsdToEur] = useState(0.92) // Default fallback rate (approximate)
   const chartRef = useRef<HTMLDivElement | null>(null)
   const pdfNominalRef = useRef<HTMLDivElement | null>(null)
   const pdfRealRef = useRef<HTMLDivElement | null>(null)
   const [activeTab, setActiveTab] = useState<'chart' | 'data'>('chart')
 
-  // Fetch instruments once on mount
+  // Fetch instruments and FX rate once on mount
   useEffect(() => {
     fetch(`${API_BASE}/instruments`).then(r => r.json()).then(setInstruments).catch(() => setInstruments([]))
+    fetch(`${API_BASE}/instruments/fx-rate`).then(r => r.json()).then((data: { usdToEur: number }) => {
+      if (data.usdToEur > 0) setUsdToEur(data.usdToEur)
+    }).catch(() => {}) // Use default fallback if API call fails
   }, [])
 
   // Filter + sort instruments for display
@@ -110,9 +114,14 @@ export default function App() {
   }
 
   // Compute current market value of all positions: sum(quantity × currentPrice)
-  const basketMarketValue = useMemo(() => {
+  // Prices are in USD, so we convert to EUR for display and sending to backend
+  const basketMarketValueUsd = useMemo(() => {
     return basket.reduce((sum, p) => sum + (instruments.find(i => i.isin === p.isin)?.currentPrice ?? 0) * p.quantity, 0)
   }, [basket, instruments])
+  
+  const basketMarketValue = useMemo(() => {
+    return basketMarketValueUsd * usdToEur // Convert USD to EUR for display
+  }, [basketMarketValueUsd, usdToEur])
 
   // Auto-compute fees (bps) from basket instruments' expense ratios
   const autoFeesBps = useMemo(() => {
@@ -204,7 +213,18 @@ export default function App() {
     if (!canSimulate) return
     setLoading(true)
     try {
-      const body: any = { positions: basket, initialCapital: basketMarketValue, sideCapital, years, dca, feesAnnualBps: feesBps, realTerms: showReal, inflationAnnual: inflation }
+      // Send initialCapital in USD (as calculated from USD prices), backend will handle conversion
+      // DCA amounts and sideCapital are in EUR (user input), backend will convert them
+      const body: any = { 
+        positions: basket, 
+        initialCapital: basketMarketValueUsd, // Send USD value, backend converts to EUR
+        sideCapital, // User input in EUR
+        years, 
+        dca, // DCA amounts are in EUR (user input)
+        feesAnnualBps: feesBps, 
+        realTerms: showReal, 
+        inflationAnnual: inflation 
+      }
       const res = await fetch(`${API_BASE}/simulations`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       })

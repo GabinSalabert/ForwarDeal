@@ -27,6 +27,11 @@ public class SimulationService {
         // Convert annual fees in basis points to an annual rate (e.g., 30 bps => 0.003)
         double annualFees = req.feesAnnualBps() / 10000.0; // convert bps to rate
 
+        // Get EUR/USD exchange rate (USD per EUR, e.g., 1.10 means 1 EUR = 1.10 USD)
+        // All user inputs are in EUR, but prices are in USD, so we need to convert
+        double eurToUsd = marketProvider.getEurToUsdRate();
+        double usdToEur = 1.0 / eurToUsd; // For converting USD values back to EUR for display
+
         // Resolve every requested ISIN to a known Instrument, fail fast if any is missing
         Map<String, Instrument> instrumentMap = new HashMap<>();
         for (InstrumentPosition p : req.positions()) {
@@ -69,12 +74,20 @@ public class SimulationService {
 
         // Add starting point (month 0)
         // total = market value of basket + side capital (cash on the side)
-        // contributed = initial capital only (basket value at t=0), excluding side capital
-        double startValue = totalPortfolioValue(unitsHeld, prices) + req.sideCapital();
-        contributed = req.initialCapital();
-        portfolio.add(new TimePoint(0, startValue, contributed, dividendsPaidCumulative, 0.0));
+        // All prices are in USD, so portfolio value is in USD. We convert to EUR for display.
+        // Note: initialCapital from frontend is actually in USD (calculated from USD prices),
+        // but sideCapital is entered by user and is in EUR, so we convert it.
+        double startValueUsd = totalPortfolioValue(unitsHeld, prices) + (req.sideCapital() * eurToUsd);
+        double startValueEur = startValueUsd * usdToEur;
+        // initialCapital is actually in USD from frontend calculation, convert to EUR for tracking
+        double initialCapitalUsd = req.initialCapital();
+        double initialCapitalEur = initialCapitalUsd * usdToEur;
+        contributed = initialCapitalEur; // Track contributed in EUR for display
+        portfolio.add(new TimePoint(0, startValueEur, contributed, dividendsPaidCumulative * usdToEur, 0.0));
         for (String isin : perInstrumentPoints.keySet()) {
-            perInstrumentPoints.get(isin).add(new InstrumentSeriesPoint(0, unitsHeld.get(isin) * prices.get(isin)));
+            double valueUsd = unitsHeld.get(isin) * prices.get(isin);
+            double valueEur = valueUsd * usdToEur;
+            perInstrumentPoints.get(isin).add(new InstrumentSeriesPoint(0, valueEur));
         }
 
         // Nominal monthly return from ACGR (deterministic growth path per instrument)
@@ -96,7 +109,9 @@ public class SimulationService {
 
         for (int m = 1; m <= months; m++) {
             double monthlyDividendsGeneratedTotal = 0.0;
-            // Evolve prices monthly using ACGR-derived monthly returns + fees.
+            
+            // First, evolve prices monthly using ACGR-derived monthly returns + fees.
+            // This applies to all units held at the start of the month (from previous months).
             for (Map.Entry<String, Instrument> e : instrumentMap.entrySet()) {
                 String isin = e.getKey();
                 Instrument inst = e.getValue();
@@ -135,6 +150,35 @@ public class SimulationService {
 
                 prices.put(isin, newPrice);
             }
+            
+            // Then, apply DCA at the END of the month (after returns are applied).
+            // New investments purchased this month will benefit from returns starting next month.
+            // Interpretation: 'periods' = number of individual contributions per frequency window
+            // Example: MONTHLY + periods=2 + amount=100 => invest 200 at each end-of-month checkpoint
+            if (req.dca() != null && req.dca().amountPerPeriod() > 0 && dcaEveryMonths > 0) {
+                if (m % dcaEveryMonths == 0) {
+                    int investsPerPeriod = Math.max(1, req.dca().periods());
+                    // User inputs are in EUR, convert to USD for purchasing shares (prices are in USD)
+                    double investTotalEur = req.dca().amountPerPeriod() * investsPerPeriod;
+                    double investTotalUsd = investTotalEur * eurToUsd;
+                    // Allocate proportionally to the original quantity weights when they exist,
+                    // otherwise distribute equally across all positions to enable starting from zero units.
+                    double totalQtyNow = req.positions().stream().mapToDouble(InstrumentPosition::quantity).sum();
+                    boolean allZero = totalQtyNow == 0.0;
+                    int n = req.positions().size();
+                    for (InstrumentPosition p : req.positions()) {
+                        double share = allZero ? (n > 0 ? 1.0 / n : 0.0) : p.quantity() / totalQtyNow;
+                        double investUsd = investTotalUsd * share; // Investment amount in USD
+                        double price = prices.get(p.isin()); // Price is in USD
+                        if (price > 0 && investUsd > 0) {
+                            double addedUnits = investUsd / price;
+                            unitsHeld.put(p.isin(), unitsHeld.get(p.isin()) + addedUnits);
+                            // Track contributed in EUR for display consistency
+                            contributed += investTotalEur * share;
+                        }
+                    }
+                }
+            }
 
             // Year boundary: reset yearly tracking (bars only). We do not attribute to value to avoid double counting.
             if (m % 12 == 0) {
@@ -143,37 +187,15 @@ public class SimulationService {
                 }
             }
 
-            // Apply DCA at the end of each frequency period.
-            // Interpretation: 'periods' = number of individual contributions per frequency window
-            // Example: MONTHLY + periods=2 + amount=100 => invest 200 at each end-of-month checkpoint
-            if (req.dca() != null && req.dca().amountPerPeriod() > 0 && dcaEveryMonths > 0) {
-                if (m % dcaEveryMonths == 0) {
-                    int investsPerPeriod = Math.max(1, req.dca().periods());
-                    double investTotalThisEvent = req.dca().amountPerPeriod() * investsPerPeriod;
-                    // Allocate proportionally to the original quantity weights when they exist,
-                    // otherwise distribute equally across all positions to enable starting from zero units.
-                    double totalQtyNow = req.positions().stream().mapToDouble(InstrumentPosition::quantity).sum();
-                    boolean allZero = totalQtyNow == 0.0;
-                    int n = req.positions().size();
-                    for (InstrumentPosition p : req.positions()) {
-                        double share = allZero ? (n > 0 ? 1.0 / n : 0.0) : p.quantity() / totalQtyNow;
-                        double invest = investTotalThisEvent * share;
-                        double price = prices.get(p.isin());
-                        if (price > 0 && invest > 0) {
-                            double addedUnits = invest / price;
-                            unitsHeld.put(p.isin(), unitsHeld.get(p.isin()) + addedUnits);
-                            contributed += invest;
-                        }
-                    }
-                }
-            }
-
             // Total value = holdings + side capital (no dividend cash attribution; ACGR already includes dividends)
-            double totalValue = totalPortfolioValue(unitsHeld, prices) + req.sideCapital();
-            portfolio.add(new TimePoint(m, totalValue, contributed, dividendsPaidCumulative, monthlyDividendsGeneratedTotal));
+            // All internal calculations are in USD, but we convert to EUR for display
+            double totalValueUsd = totalPortfolioValue(unitsHeld, prices) + (req.sideCapital() * eurToUsd);
+            double totalValueEur = totalValueUsd * usdToEur;
+            portfolio.add(new TimePoint(m, totalValueEur, contributed, dividendsPaidCumulative * usdToEur, monthlyDividendsGeneratedTotal * usdToEur));
             for (String isin : perInstrumentPoints.keySet()) {
-                double base = unitsHeld.get(isin) * prices.get(isin);
-                perInstrumentPoints.get(isin).add(new InstrumentSeriesPoint(m, base));
+                double baseUsd = unitsHeld.get(isin) * prices.get(isin);
+                double baseEur = baseUsd * usdToEur;
+                perInstrumentPoints.get(isin).add(new InstrumentSeriesPoint(m, baseEur));
             }
         }
 
