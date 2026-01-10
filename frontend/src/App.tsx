@@ -71,6 +71,7 @@ export default function App() {
   const chartRef = useRef<HTMLDivElement | null>(null)
   const pdfNominalRef = useRef<HTMLDivElement | null>(null)
   const pdfRealRef = useRef<HTMLDivElement | null>(null)
+  const pdfDataRef = useRef<HTMLDivElement | null>(null)
   const [activeTab, setActiveTab] = useState<'chart' | 'data'>('chart')
 
   // Fetch instruments and FX rate once on mount
@@ -227,113 +228,94 @@ export default function App() {
     }
   }
 
-  // Export a styled, modern PDF with key KPIs and per-instrument yearly evolution
+  // Export a styled PDF with the complete Data section content - smart pagination
   const downloadPdf = async () => {
     if (!result) return
-    // Snapshot chart
-    const container = chartRef.current
-    let chartImg: string | null = null
-    if (container) {
-      const canvas = await html2canvas(container, { backgroundColor: '#0b1220', scale: 2 })
-      chartImg = canvas.toDataURL('image/png')
-    }
-
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
+    
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
     const pageW = doc.internal.pageSize.getWidth()
     const pageH = doc.internal.pageSize.getHeight()
-    const margin = 36
-    let y = margin
+    const margin = 40
+    const maxContentHeight = pageH - margin * 2
 
-    // Header
-    doc.setFillColor(17, 24, 39) // slate-900
-    doc.setTextColor(255, 255, 255)
-    doc.roundedRect(margin, y, pageW - margin * 2, 40, 8, 8, 'F')
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(16)
-    doc.text('Forwardeal — Simulation Report', margin + 16, y + 26)
-    y += 56
+    // Get all sections marked with data-pdf-section
+    const container = pdfDataRef.current
+    if (!container) return
 
-    // Helpers to avoid locale Unicode separators that some PDF fonts misrender
-    const formatPdfNumber = (n: number) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Math.round(n))
-    const formatPdfCurrency = (n: number) => `${formatPdfNumber(n)} EUR`
+    const sections = container.querySelectorAll('[data-pdf-section]')
+    let currentY = margin
 
-    // KPI cards: Initial capital (basket), Final capital, Period
-    const finalTotal = result.portfolio[result.portfolio.length - 1]?.totalValue ?? 0
-    const kpiW = (pageW - margin * 2 - 24) / 3
-    const kpiH = 72
-    const kpiTitles = ['Initial capital', 'Final capital', 'Period']
-    const kpiValues = [formatPdfCurrency(basketMarketValue), formatPdfCurrency(finalTotal), `${years} years`]
-    for (let i = 0; i < 3; i++) {
-      const x = margin + i * (kpiW + 12)
-      doc.setFillColor(241, 245, 249) // slate-100
-      doc.roundedRect(x, y, kpiW, kpiH, 10, 10, 'F')
-      doc.setTextColor(51, 65, 85) // slate-700
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(11)
-      doc.text(kpiTitles[i], x + 14, y + 22)
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(16)
-      // Avoid exotic separators; using en-US already yields commas
-      doc.text(kpiValues[i], x + 14, y + 46)
-    }
-    y += kpiH + 20
+    for (const section of Array.from(sections)) {
+      // Capture this section as a separate canvas
+      const sectionCanvas = await html2canvas(section as HTMLElement, {
+        scale: 2,
+        backgroundColor: '#ffffff',
+        logging: false,
+        useCORS: true
+      })
 
-    // Chart image (styled)
-    if (chartImg) {
       const imgW = pageW - margin * 2
-      const imgH = imgW * 0.45
-      if (y + imgH > pageH - margin) { doc.addPage(); y = margin }
-      doc.roundedRect(margin - 4, y - 4, imgW + 8, imgH + 8, 8, 8, 'S')
-      doc.addImage(chartImg, 'PNG', margin, y, imgW, imgH, undefined, 'FAST')
-      y += imgH + 16
-    }
+      const scale = imgW / sectionCanvas.width
+      const sectionHeightPts = sectionCanvas.height * scale
 
-    // Styled HTML content snapshot: Basket table + Per-instrument yearly evolution tables
-    const addHtmlBlock = async (ref: React.RefObject<HTMLDivElement>) => {
-      const block = ref.current
-      if (!block) return
-      const blockCanvas = await html2canvas(block, { scale: 2, backgroundColor: '#ffffff' })
-      const imgW = pageW - margin * 2
-      const scale = imgW / blockCanvas.width
-      const firstAvailablePts = pageH - margin - y
-      const pageAvailablePts = pageH - margin * 2
-      let pxY = 0
-      let first = true
-      while (pxY < blockCanvas.height) {
-        const availablePts = first ? firstAvailablePts : pageAvailablePts
-        const availablePx = Math.max(50, Math.floor(availablePts / scale))
-        const slicePx = Math.min(availablePx, blockCanvas.height - pxY)
-        const sliceCanvas = document.createElement('canvas')
-        sliceCanvas.width = blockCanvas.width
-        sliceCanvas.height = slicePx
-        const ctx = sliceCanvas.getContext('2d')!
-        ctx.drawImage(blockCanvas, 0, pxY, blockCanvas.width, slicePx, 0, 0, blockCanvas.width, slicePx)
-        const sliceImg = sliceCanvas.toDataURL('image/png')
-        const slicePts = slicePx * scale
-        const drawY = first ? y : margin
-        if (!first) doc.addPage()
-        doc.addImage(sliceImg, 'PNG', margin, drawY, imgW, slicePts, undefined, 'FAST')
-        pxY += slicePx
-        first = false
+      // Check if section fits on current page
+      const spaceLeft = pageH - margin - currentY
+      
+      if (sectionHeightPts <= spaceLeft) {
+        // Section fits on current page
+        const imgData = sectionCanvas.toDataURL('image/png')
+        doc.addImage(imgData, 'PNG', margin, currentY, imgW, sectionHeightPts, undefined, 'FAST')
+        currentY += sectionHeightPts + 8 // 8pt spacing between sections
+      } else if (sectionHeightPts <= maxContentHeight) {
+        // Section doesn't fit but can fit on a new page entirely
+        doc.addPage()
+        currentY = margin
+        const imgData = sectionCanvas.toDataURL('image/png')
+        doc.addImage(imgData, 'PNG', margin, currentY, imgW, sectionHeightPts, undefined, 'FAST')
+        currentY += sectionHeightPts + 8
+      } else {
+        // Section is too large, need to split it (for very long sections)
+        let pxY = 0
+        while (pxY < sectionCanvas.height) {
+          const availablePts = currentY === margin ? maxContentHeight : (pageH - margin - currentY)
+          const availablePx = Math.floor(availablePts / scale)
+          const slicePx = Math.min(availablePx, sectionCanvas.height - pxY)
+          
+          if (slicePx < 50) {
+            // Not enough space, go to next page
+            doc.addPage()
+            currentY = margin
+            continue
+          }
+
+          const sliceCanvas = document.createElement('canvas')
+          sliceCanvas.width = sectionCanvas.width
+          sliceCanvas.height = slicePx
+          const ctx = sliceCanvas.getContext('2d')!
+          ctx.drawImage(sectionCanvas, 0, pxY, sectionCanvas.width, slicePx, 0, 0, sectionCanvas.width, slicePx)
+
+          const sliceImg = sliceCanvas.toDataURL('image/png')
+          const slicePts = slicePx * scale
+          doc.addImage(sliceImg, 'PNG', margin, currentY, imgW, slicePts, undefined, 'FAST')
+          
+          pxY += slicePx
+          currentY += slicePts
+          
+          if (pxY < sectionCanvas.height) {
+            doc.addPage()
+            currentY = margin
+          }
+        }
+        currentY += 8
       }
-      y = margin
     }
 
-    // Nominal tables
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(12)
-    doc.text('Nominal (tables)', margin, y)
-    y += 14
-    await addHtmlBlock(pdfNominalRef)
+    // Add footer on last page
+    doc.setFontSize(8)
+    doc.setTextColor(150, 150, 150)
+    doc.text(`Generated by Forwardeal — ${new Date().toLocaleDateString()}`, margin, pageH - 20)
 
-    // Real tables
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(12)
-    doc.text('Real (tables, FR inflation deflated)', margin, y)
-    y += 14
-    await addHtmlBlock(pdfRealRef)
-
-    doc.save(`forwardeal-report-${Date.now()}.pdf`)
+    doc.save(`forwardeal-simulation-${new Date().toISOString().slice(0,10)}.pdf`)
   }
 
   return (
@@ -1062,6 +1044,252 @@ export default function App() {
                   </div>
                 )
               })}
+            </div>
+          )}
+          
+          {/* PDF DATA SECTION - Hidden, always rendered when result exists */}
+          {result && (
+            <div ref={pdfDataRef} className="fixed -left-[9999px] top-0 w-[800px] bg-white text-slate-800 p-8" style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+              {/* Header - marked as PDF section */}
+              <div data-pdf-section="header" className="mb-8 pb-4 border-b-2 border-indigo-600">
+                <h1 className="text-2xl font-bold text-indigo-900">Forwardeal — Rapport de Simulation</h1>
+                <p className="text-sm text-slate-500 mt-1">Généré le {new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+              </div>
+
+              {/* Global Summary */}
+              {(() => {
+                const totalEnd = result.portfolio[result.portfolio.length - 1]?.totalValue ?? 0
+                const totalContributed = result.portfolio[result.portfolio.length - 1]?.contributed ?? 0
+                const totalGain = totalEnd - totalContributed
+                const totalGainPct = totalContributed > 0 ? totalGain / totalContributed : 0
+                const weightedAcgr = (() => {
+                  if (!result.instruments || result.instruments.length === 0) return 0
+                  const acgrs = result.instruments.map(s => {
+                    const ins = instruments.find(i => i.isin === s.isin)
+                    return ins?.acgr10 ?? ins?.totalAnnualReturnRate ?? 0
+                  })
+                  if (acgrs.length === 0) return 0
+                  return acgrs.reduce((sum, a) => sum + a, 0) / acgrs.length
+                })()
+                const hasDca = dca && dca.amountPerPeriod > 0
+                const avgInvestmentDuration = years / 2
+
+                return (
+                  <div data-pdf-section="summary" className="mb-8">
+                    <h2 className="text-lg font-bold text-slate-800 mb-4">📊 Résumé de votre investissement</h2>
+                    
+                    {/* KPI Cards */}
+                    <div className="grid grid-cols-4 gap-3 mb-6">
+                      <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-200">
+                        <div className="text-xs text-indigo-600 font-medium mb-1">💰 Total investi</div>
+                        <div className="text-lg font-bold text-indigo-900">{fmtCur.format(totalContributed)}</div>
+                      </div>
+                      <div className="bg-emerald-50 rounded-lg p-4 border border-emerald-200">
+                        <div className="text-xs text-emerald-600 font-medium mb-1">🎯 Valeur finale</div>
+                        <div className="text-lg font-bold text-emerald-700">{fmtCur.format(totalEnd)}</div>
+                      </div>
+                      <div className={`rounded-lg p-4 border ${totalGain >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                        <div className={`text-xs font-medium mb-1 ${totalGain >= 0 ? 'text-green-600' : 'text-red-600'}`}>✨ Gains totaux</div>
+                        <div className={`text-lg font-bold ${totalGain >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                          {totalGain >= 0 ? '+' : ''}{fmtCur.format(totalGain)}
+                        </div>
+                        <div className={`text-xs ${totalGain >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {(totalGainPct * 100).toFixed(1)}% de rendement
+                        </div>
+                      </div>
+                      <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+                        <div className="text-xs text-amber-600 font-medium mb-1">📈 ACGR du marché</div>
+                        <div className="text-lg font-bold text-amber-700">+{(weightedAcgr * 100).toFixed(1)}%/an</div>
+                        <div className="text-xs text-amber-600">sur 10 ans</div>
+                      </div>
+                    </div>
+
+                    {/* Explanation boxes */}
+                    <div className="bg-blue-50 rounded-lg p-4 border border-blue-200 mb-4">
+                      <p className="text-sm text-blue-800">
+                        <strong>💡 Intérêts composés :</strong> Vos gains génèrent eux-mêmes des gains ! 
+                        C'est pour cela que votre investissement de <strong>{fmtCur.format(totalContributed)}</strong> vaut maintenant <strong className="text-emerald-600">{fmtCur.format(totalEnd)}</strong>.
+                      </p>
+                    </div>
+
+                    {hasDca && (
+                      <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+                        <p className="text-sm text-amber-800 font-medium mb-2">
+                          ⚠️ Pourquoi mes gains ({(totalGainPct * 100).toFixed(1)}%) semblent plus bas que l'ACGR ({(weightedAcgr * 100).toFixed(1)}%/an) ?
+                        </p>
+                        <p className="text-sm text-amber-700 mb-2">
+                          Avec le <strong>DCA</strong> (investissement progressif), votre argent n'est pas investi pendant toute la durée :
+                        </p>
+                        <ul className="text-xs text-amber-700 space-y-1 ml-4">
+                          <li>• Votre 1er versement a profité de {years} ans de croissance</li>
+                          <li>• Votre dernier versement n'a eu que quelques mois</li>
+                          <li>• En moyenne, votre argent a été investi ~{avgInvestmentDuration.toFixed(1)} ans</li>
+                        </ul>
+                        <p className="text-sm text-amber-700 mt-2">
+                          → C'est <strong>normal</strong> ! Le marché a bien fait +{(weightedAcgr * 100).toFixed(1)}%/an, mais tout votre argent n'en a pas profité pendant {years} ans.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* Per-instrument yearly breakdown - each year on its own "page" */}
+              {result.instruments.map((s) => {
+                const ins = instruments.find(i => i.isin === s.isin)
+                const acgr = (ins?.acgr10 ?? ins?.totalAnnualReturnRate ?? 0) * 100
+                const totalContributedInstr = result.portfolio[result.portfolio.length - 1]?.contributed ?? 0
+                const endVal = s.points[s.points.length - 1]?.value ?? 0
+                const totalGainInstr = endVal - totalContributedInstr
+                const totalGainPctInstr = totalContributedInstr > 0 ? totalGainInstr / totalContributedInstr : 0
+
+                return (
+                  <div key={s.isin} className="mb-6">
+                    {/* Instrument header */}
+                    <div data-pdf-section={`instrument-${s.isin}`} className="bg-slate-100 rounded-lg p-4 mb-4 border border-slate-200">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h3 className="font-bold text-slate-800 text-lg">{s.name}</h3>
+                          <p className="text-xs text-slate-500">{s.isin}</p>
+                        </div>
+                        <div className="text-right">
+                          <div className={`text-xl font-bold ${totalGainInstr >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {totalGainInstr >= 0 ? '+' : ''}{fmtCur.format(totalGainInstr)}
+                          </div>
+                          <div className={`text-sm ${totalGainPctInstr >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            ({(totalGainPctInstr * 100).toFixed(1)}%)
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-sm text-slate-600">
+                        ACGR historique : <strong>{acgr.toFixed(1)}%/an</strong>
+                      </div>
+                    </div>
+
+                    {/* Yearly breakdown - each year stays together */}
+                    {Array.from({ length: years }).map((_, yIdx) => {
+                      const year = yIdx + 1
+                      const startIdx = yIdx * 12
+                      const endIdx = Math.min(year * 12, s.points.length - 1)
+                      const yearStartVal = s.points[startIdx]?.value ?? 0
+                      const yearEndVal = s.points[endIdx]?.value ?? 0
+                      const yearStartContrib = result.portfolio[startIdx]?.contributed ?? 0
+                      const yearEndContrib = result.portfolio[endIdx]?.contributed ?? 0
+                      const yearDcaAdded = yearEndContrib - yearStartContrib
+                      const yearMarketGain = (yearEndVal - yearStartVal) - yearDcaAdded
+                      const avgCapitalDuringYear = (yearStartVal + yearEndVal) / 2
+                      const yearGainPct = avgCapitalDuringYear > 0 ? yearMarketGain / avgCapitalDuringYear : 0
+
+                      // Monthly data
+                      const monthlyData: Array<{month: number, value: number, dcaAdded: number, variation: number, variationPct: number, totalInvested: number, totalInterestEarned: number, totalReturnPct: number}> = []
+                      for (let m = 0; m < 12; m++) {
+                        const mIdx = startIdx + m
+                        if (mIdx >= s.points.length) break
+                        const prevIdx = mIdx > 0 ? mIdx - 1 : 0
+                        const prevVal = mIdx > 0 ? (s.points[prevIdx]?.value ?? 0) : 0
+                        const curVal = s.points[mIdx]?.value ?? 0
+                        const prevContrib = mIdx > 0 ? (result.portfolio[prevIdx]?.contributed ?? 0) : 0
+                        const curContrib = result.portfolio[mIdx]?.contributed ?? 0
+                        const dcaThisMonth = curContrib - prevContrib
+                        const totalChange = curVal - prevVal
+                        const variation = mIdx === 0 ? 0 : totalChange - dcaThisMonth
+                        const capitalAtStartOfMonth = prevVal > 0 ? prevVal : (curContrib - dcaThisMonth)
+                        const variationPct = capitalAtStartOfMonth > 0 ? variation / capitalAtStartOfMonth : 0
+                        const totalInvested = curContrib
+                        const totalInterestEarned = curVal - totalInvested
+                        const totalReturnPct = totalInvested > 0 ? totalInterestEarned / totalInvested : 0
+
+                        monthlyData.push({ month: m + 1, value: curVal, dcaAdded: dcaThisMonth, variation, variationPct, totalInvested, totalInterestEarned, totalReturnPct })
+                      }
+
+                      const isFirstYear = year === 1
+                      const monthsWithData = isFirstYear ? monthlyData.slice(1) : monthlyData
+                      const positiveMonths = monthsWithData.filter(m => m.variation > 0.01).length
+                      const negativeMonths = monthsWithData.filter(m => m.variation < -0.01).length
+
+                      return (
+                        <div key={year} data-pdf-section={`year-${s.isin}-${year}`} className="mb-4 border border-slate-200 rounded-lg overflow-hidden">
+                          {/* Year header */}
+                          <div className={`px-4 py-3 ${yearMarketGain >= 0 ? 'bg-emerald-50' : 'bg-red-50'}`}>
+                            <div className="flex justify-between items-center">
+                              <div>
+                                <span className="font-bold text-slate-800">Année {year}</span>
+                                <span className="ml-3 text-xs text-slate-500">
+                                  📈 {positiveMonths} hausse • 📉 {negativeMonths} baisse
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <div className={`font-bold ${yearMarketGain >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                  {yearMarketGain >= 0 ? '+' : ''}{fmtCur.format(yearMarketGain)}
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                  +{fmtCur.format(yearDcaAdded)} investis • {(yearGainPct * 100).toFixed(1)}%
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Monthly table */}
+                          <table className="w-full text-xs">
+                            <thead className="bg-slate-50 text-slate-600">
+                              <tr>
+                                <th className="text-left px-2 py-1.5">Mois</th>
+                                <th className="text-right px-2 py-1.5">Valeur</th>
+                                <th className="text-right px-2 py-1.5">DCA</th>
+                                <th className="text-right px-2 py-1.5">Var.</th>
+                                <th className="text-right px-2 py-1.5">%</th>
+                                <th className="text-right px-2 py-1.5">Investi</th>
+                                <th className="text-right px-2 py-1.5">Gains</th>
+                                <th className="text-right px-2 py-1.5">Rend.</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {monthlyData.map((m, mIdx) => {
+                                const monthNames = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc']
+                                const globalMonthIdx = startIdx + mIdx
+                                return (
+                                  <tr key={m.month} className={mIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                                    <td className="px-2 py-1 font-medium">{monthNames[m.month - 1]}</td>
+                                    <td className="px-2 py-1 text-right font-bold">{fmtCur.format(m.value)}</td>
+                                    <td className="px-2 py-1 text-right text-blue-600">{m.dcaAdded > 0 ? `+${fmtCur.format(m.dcaAdded)}` : '—'}</td>
+                                    <td className={`px-2 py-1 text-right ${m.variation >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                      {globalMonthIdx === 0 ? '—' : `${m.variation >= 0 ? '+' : ''}${fmtCur.format(m.variation)}`}
+                                    </td>
+                                    <td className={`px-2 py-1 text-right ${m.variationPct >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                      {globalMonthIdx === 0 ? '—' : `${(m.variationPct * 100).toFixed(1)}%`}
+                                    </td>
+                                    <td className="px-2 py-1 text-right text-slate-600">{fmtCur.format(m.totalInvested)}</td>
+                                    <td className={`px-2 py-1 text-right ${m.totalInterestEarned >= 0 ? 'text-amber-600' : 'text-red-600'}`}>
+                                      {m.totalInterestEarned >= 0 ? '+' : ''}{fmtCur.format(m.totalInterestEarned)}
+                                    </td>
+                                    <td className={`px-2 py-1 text-right font-bold ${m.totalReturnPct >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                      {(m.totalReturnPct * 100).toFixed(1)}%
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )
+                    })}
+
+                    {/* Final result */}
+                    <div data-pdf-section={`result-${s.isin}`} className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg p-4 border border-indigo-200 mt-4">
+                      <p className="text-sm text-indigo-800">
+                        📌 <strong>Résultat :</strong> {fmtCur.format(totalContributedInstr)} → <strong className="text-emerald-600">{fmtCur.format(endVal)}</strong>
+                        <span className={totalGainPctInstr >= 0 ? 'text-emerald-600' : 'text-red-600'}> ({totalGainPctInstr >= 0 ? '+' : ''}{(totalGainPctInstr * 100).toFixed(1)}% en {years} ans)</span>
+                      </p>
+                    </div>
+                  </div>
+                )
+              })}
+
+              {/* Footer */}
+              <div data-pdf-section="footer" className="mt-8 pt-4 border-t border-slate-200 text-center text-xs text-slate-400">
+                <p>Simulation basée sur l'ACGR historique • Les performances passées ne garantissent pas les performances futures</p>
+                <p className="mt-1">Généré par Forwardeal</p>
+              </div>
             </div>
           )}
         </div>
