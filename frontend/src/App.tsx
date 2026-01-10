@@ -673,74 +673,354 @@ export default function App() {
           )}
           {result && activeTab === 'data' && (
             <div className="h-[calc(100%-3.5rem)] overflow-y-auto custom-scroll space-y-6">
+              {/* Global Summary Card */}
+              {(() => {
+                const totalStart = result.portfolio[0]?.totalValue ?? 0
+                const totalEnd = result.portfolio[result.portfolio.length - 1]?.totalValue ?? 0
+                const totalContributed = result.portfolio[result.portfolio.length - 1]?.contributed ?? 0
+                const totalGain = totalEnd - totalContributed
+                const totalGainPct = totalContributed > 0 ? totalGain / totalContributed : 0
+                
+                // Calculate weighted average ACGR from result instruments
+                const weightedAcgr = (() => {
+                  if (!result.instruments || result.instruments.length === 0) return 0
+                  // Use instruments from result and find their ACGR from the instruments list
+                  const acgrs = result.instruments.map(s => {
+                    const ins = instruments.find(i => i.isin === s.isin)
+                    return ins?.acgr10 ?? ins?.totalAnnualReturnRate ?? 0
+                  })
+                  // Simple average if we can't get weights
+                  if (acgrs.length === 0) return 0
+                  return acgrs.reduce((sum, a) => sum + a, 0) / acgrs.length
+                })()
+                
+                // Average investment duration with DCA (in years)
+                // First euro invested for full period, last euro for 0 time
+                // Average = years / 2 approximately
+                const avgInvestmentDuration = years / 2
+                const hasDca = dca && dca.amountPerPeriod > 0
+                
+                return (
+                  <div className="rounded-2xl bg-gradient-to-br from-indigo-900/40 to-slate-900/60 ring-1 ring-indigo-500/30 p-6">
+                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                      <span className="text-2xl">📊</span> Résumé de votre investissement
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                      <div className="bg-slate-800/50 rounded-xl p-4">
+                        <div className="text-xs text-slate-400 mb-1">💰 Total investi</div>
+                        <div className="text-xl font-bold text-white">{fmtCur.format(totalContributed)}</div>
+                      </div>
+                      <div className="bg-slate-800/50 rounded-xl p-4">
+                        <div className="text-xs text-slate-400 mb-1">🎯 Valeur finale</div>
+                        <div className="text-xl font-bold text-emerald-400">{fmtCur.format(totalEnd)}</div>
+                      </div>
+                      <div className="bg-slate-800/50 rounded-xl p-4">
+                        <div className="text-xs text-slate-400 mb-1">✨ Gains totaux</div>
+                        <div className={`text-xl font-bold ${totalGain >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {totalGain >= 0 ? '+' : ''}{fmtCur.format(totalGain)}
+                        </div>
+                        <div className={`text-sm ${totalGain >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                          soit +{(totalGainPct * 100).toFixed(1)}% sur le capital investi
+                        </div>
+                      </div>
+                      <div className="bg-slate-800/50 rounded-xl p-4">
+                        <div className="text-xs text-slate-400 mb-1">📈 Rendement du marché (ACGR)</div>
+                        <div className="text-xl font-bold text-amber-400">
+                          +{(weightedAcgr * 100).toFixed(1)}%/an
+                        </div>
+                        <div className="text-xs text-slate-500">moyenne historique sur 10 ans</div>
+                      </div>
+                    </div>
+                    
+                    {/* Explanation box */}
+                    <div className="bg-slate-800/30 rounded-lg p-4 text-sm space-y-3">
+                      <div className="text-slate-300">
+                        <span className="text-indigo-400 font-medium">💡 Intérêts composés :</span> Vos gains génèrent eux-mêmes des gains ! 
+                        C'est pour cela que votre investissement de <span className="text-white font-medium">{fmtCur.format(totalContributed)}</span> vaut maintenant <span className="text-emerald-400 font-medium">{fmtCur.format(totalEnd)}</span>.
+                      </div>
+                      
+                      {hasDca && (
+                        <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-3 text-amber-200">
+                          <span className="font-medium">⚠️ Pourquoi mes gains ({(totalGainPct * 100).toFixed(1)}%) semblent plus bas que l'ACGR ({(weightedAcgr * 100).toFixed(1)}%/an) ?</span>
+                          <p className="mt-1 text-amber-100/80">
+                            Avec le <strong>DCA</strong> (investissement progressif), votre argent n'est pas investi pendant toute la durée :
+                          </p>
+                          <ul className="mt-2 text-xs space-y-1 text-amber-100/70">
+                            <li>• Votre 1er versement a profité de {years} ans de croissance</li>
+                            <li>• Votre dernier versement n'a eu que quelques mois</li>
+                            <li>• <strong>En moyenne</strong>, votre argent a été investi ~{avgInvestmentDuration.toFixed(1)} ans</li>
+                          </ul>
+                          <p className="mt-2 text-amber-100/80">
+                            → C'est <strong>normal</strong> ! Le marché a bien fait +{(weightedAcgr * 100).toFixed(1)}%/an, mais tout votre argent n'en a pas profité pendant {years} ans.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Per-instrument detailed breakdown */}
               {result.instruments.map((s, idx) => {
                 const color = palette[idx % palette.length]
+                const ins = instruments.find(i => i.isin === s.isin)
+                const acgr = (ins?.acgr10 ?? ins?.totalAnnualReturnRate ?? 0) * 100
                 const start0 = s.points[0]?.value ?? 0
+                const endVal = s.points[s.points.length - 1]?.value ?? 0
+                
+                // Get total contributed for this instrument to calculate real gains
+                const totalContributedInstr = result.portfolio[result.portfolio.length - 1]?.contributed ?? 0
+                const totalGainInstr = endVal - totalContributedInstr
+                const totalGainPctInstr = totalContributedInstr > 0 ? totalGainInstr / totalContributedInstr : 0
+                
                 return (
-                  <div key={s.isin} className="rounded-xl ring-1 ring-slate-700/50 bg-slate-900/60 p-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
-                      <div className="text-sm font-semibold text-slate-100">{s.name}</div>
-                      <div className="text-xs text-slate-400">{s.isin}</div>
-                      <div className="ml-auto text-[11px] text-slate-400">ACGR {( (instruments.find(i=>i.isin===s.isin)?.acgr10 ?? instruments.find(i=>i.isin===s.isin)?.totalAnnualReturnRate ?? 0) * 100).toFixed(1)}% • Fees {( ((instruments.find(i=>i.isin===s.isin)?.expenseRatioAnnual ?? 0)*100) ).toFixed(2)}%</div>
+                  <div key={s.isin} className="rounded-xl ring-1 ring-slate-700/50 bg-slate-900/60 p-5">
+                    {/* Header with summary */}
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <span className="inline-block h-4 w-4 rounded-full" style={{ backgroundColor: color }} />
+                        <div>
+                          <div className="text-base font-semibold text-slate-100">{s.name}</div>
+                          <div className="text-xs text-slate-400">{s.isin}</div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className={`text-lg font-bold ${totalGainInstr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {totalGainInstr >= 0 ? '+' : ''}{fmtCur.format(totalGainInstr)}
+                        </div>
+                        <div className={`text-sm ${totalGainPctInstr >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                          {totalGainPctInstr >= 0 ? '+' : ''}{(totalGainPctInstr * 100).toFixed(1)}% sur {years} ans
+                        </div>
+                      </div>
                     </div>
-                    <div className="overflow-x-auto overflow-y-hidden rounded-lg ring-1 ring-slate-700/50">
-                      <table className="min-w-full text-sm">
-                        <thead className="bg-slate-800/60 text-slate-300">
-                          <tr>
-                            <th className="text-left px-3 py-2">Year</th>
-                            <th className="text-right px-3 py-2">Start</th>
-                            <th className="text-right px-3 py-2">End</th>
-                            <th className="text-right px-3 py-2">Δ</th>
-                            <th className="text-right px-3 py-2">Δ%</th>
-                            <th className="text-right px-3 py-2">Min</th>
-                            <th className="text-right px-3 py-2">Max</th>
-                            <th className="text-right px-3 py-2">Max DD%</th>
-                            <th className="text-right px-3 py-2">CAGR‑to‑date</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                        {Array.from({ length: years }).map((_, yIdx) => {
-                            const year = yIdx + 1
-                          const startIdx = Math.min(yIdx * 12, s.points.length - 1)
-                          const endIdx = Math.min(year * 12, s.points.length - 1)
-                          const slice = s.points.slice(startIdx, endIdx + 1)
-                          const inflMonthly = Math.pow(1 + inflation, 1 / 12)
-                          const deflate = (val: number, mIdx: number) => val / Math.pow(inflMonthly, mIdx)
-                          const startRaw = s.points[startIdx]?.value ?? 0
-                          const endRaw = s.points[endIdx]?.value ?? 0
-                          const startV = showReal ? deflate(startRaw, startIdx) : startRaw
-                          const endV = showReal ? deflate(endRaw, endIdx) : endRaw
-                          const minV = slice.reduce((m, p, i) => {
-                            const v = showReal ? deflate(p.value, startIdx + i) : p.value
-                            return Math.min(m, v)
-                          }, Number.POSITIVE_INFINITY)
-                          const maxV = slice.reduce((m, p, i) => {
-                            const v = showReal ? deflate(p.value, startIdx + i) : p.value
-                            return Math.max(m, v)
-                          }, Number.NEGATIVE_INFINITY)
-                          const delta = endV - startV
-                          const deltaPct = startV > 0 ? delta / startV : 0
-                          const maxDDPct = maxV > 0 ? (minV - maxV) / maxV : 0 // negative value
-                          const yearsToDate = year
-                          const start0Adj = showReal ? deflate(start0, 0) : start0
-                          const cagrToDate = start0Adj > 0 && yearsToDate > 0 ? Math.pow(endV / start0Adj, 1 / yearsToDate) - 1 : 0
-                            return (
-                              <tr key={year} className={yIdx % 2 === 0 ? 'bg-slate-900/40' : 'bg-slate-900/20'}>
-                                <td className="px-3 py-2 text-slate-200">{year}</td>
-                                <td className="px-3 py-2 text-right text-slate-100">{fmtCur.format(startV)}</td>
-                                <td className="px-3 py-2 text-right text-slate-100">{fmtCur.format(endV)}</td>
-                                <td className={`px-3 py-2 text-right ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtCur.format(delta)}</td>
-                                <td className={`px-3 py-2 text-right ${deltaPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct.format(deltaPct)}</td>
-                                <td className="px-3 py-2 text-right text-slate-300">{fmtCur.format(minV)}</td>
-                                <td className="px-3 py-2 text-right text-slate-300">{fmtCur.format(maxV)}</td>
-                                <td className="px-3 py-2 text-right text-slate-300">{fmtPct.format(maxDDPct)}</td>
-                                <td className="px-3 py-2 text-right text-slate-300">{fmtPct.format(cagrToDate)}</td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
+
+                    {/* Info card about ACGR */}
+                    <div className="bg-slate-800/40 rounded-lg p-3 mb-4 text-sm">
+                      <span className="text-amber-400 font-medium">📊 Rendement historique moyen :</span>{' '}
+                      <span className="text-white font-bold">{acgr.toFixed(1)}%/an</span>
+                      <span className="text-slate-400 ml-2">
+                        (moyenne sur 10 ans — certaines années peuvent être négatives, mais sur la durée c'est positif)
+                      </span>
+                    </div>
+
+                    {/* Yearly breakdown with months */}
+                    <div className="space-y-4">
+                      {Array.from({ length: years }).map((_, yIdx) => {
+                        const year = yIdx + 1
+                        const startIdx = yIdx * 12
+                        const endIdx = Math.min(year * 12, s.points.length - 1)
+                        const yearStartVal = s.points[startIdx]?.value ?? 0
+                        const yearEndVal = s.points[endIdx]?.value ?? 0
+                        
+                        // Get contributed amounts from portfolio data
+                        const yearStartContrib = result.portfolio[startIdx]?.contributed ?? 0
+                        const yearEndContrib = result.portfolio[endIdx]?.contributed ?? 0
+                        const yearDcaAdded = yearEndContrib - yearStartContrib
+                        
+                        // Pure interest gain = value change - new contributions
+                        const yearInterestGain = (yearEndVal - yearStartVal) - yearDcaAdded
+                        
+                        // Calculate year return % based on average capital during the year
+                        // More accurate than just using start value (which could be 0 with DCA)
+                        const avgCapitalDuringYear = (yearStartVal + yearEndVal) / 2
+                        const yearGainPct = avgCapitalDuringYear > 0 ? yearInterestGain / avgCapitalDuringYear : 0
+                        
+                        // Get monthly data for this year (starting from month 1, not 0)
+                        const monthlyData = []
+                        for (let m = 0; m < 12; m++) {
+                          const mIdx = startIdx + m
+                          if (mIdx >= s.points.length) break
+                          
+                          // For month calculations, compare with previous month
+                          const prevIdx = mIdx > 0 ? mIdx - 1 : 0
+                          const prevVal = mIdx > 0 ? (s.points[prevIdx]?.value ?? 0) : 0
+                          const curVal = s.points[mIdx]?.value ?? 0
+                          
+                          // Get contributions to calculate DCA vs interest
+                          const prevContrib = mIdx > 0 ? (result.portfolio[prevIdx]?.contributed ?? 0) : 0
+                          const curContrib = result.portfolio[mIdx]?.contributed ?? 0
+                          const dcaThisMonth = curContrib - prevContrib
+                          
+                          // Interest = total change - DCA contribution
+                          // For first data point (month 0), the value IS the DCA, so interest is 0
+                          const totalChange = curVal - prevVal
+                          const interestEarned = mIdx === 0 ? 0 : totalChange - dcaThisMonth
+                          
+                          // Interest % relative to the capital at start of month
+                          const capitalAtStartOfMonth = prevVal > 0 ? prevVal : (curContrib - dcaThisMonth)
+                          const interestPct = capitalAtStartOfMonth > 0 ? interestEarned / capitalAtStartOfMonth : 0
+                          
+                          // Cumulative: total interest earned since start
+                          const totalInvested = curContrib
+                          const totalInterestEarned = curVal - totalInvested
+                          const totalReturnPct = totalInvested > 0 ? totalInterestEarned / totalInvested : 0
+                          
+                          monthlyData.push({
+                            month: m + 1,
+                            value: curVal,
+                            dcaAdded: dcaThisMonth,
+                            interestEarned: interestEarned,
+                            interestPct: interestPct,
+                            totalInvested: totalInvested,
+                            totalInterestEarned: totalInterestEarned,
+                            totalReturnPct: totalReturnPct
+                          })
+                        }
+                        
+                        // Count positive/negative months (skip month 0 which has no interest yet)
+                        const monthsWithData = monthlyData.slice(1) // Skip first month (initial investment)
+                        const positiveMonths = monthsWithData.filter(m => m.interestEarned > 0.01).length
+                        const negativeMonths = monthsWithData.filter(m => m.interestEarned < -0.01).length
+                        const neutralMonths = monthsWithData.filter(m => Math.abs(m.interestEarned) <= 0.01).length
+                        
+                        // Monthly rate for explanation
+                        const monthlyRate = acgr / 12
+                        
+                        // Total months actually shown this year
+                        const totalMonthsThisYear = monthlyData.length
+                        
+                        return (
+                          <div key={year} className="rounded-lg ring-1 ring-slate-700/40 overflow-hidden">
+                            {/* Year header */}
+                            <div className={`px-4 py-3 ${yearInterestGain >= 0 ? 'bg-emerald-900/20' : 'bg-rose-900/20'}`}>
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <span className="text-lg font-bold text-white">Année {year}</span>
+                                  <span className="text-xs text-slate-400">
+                                    📈 {positiveMonths} mois en hausse • 📉 {negativeMonths} mois en baisse
+                                    {neutralMonths > 0 && ` • ➡️ ${neutralMonths} stables`}
+                                  </span>
+                                </div>
+                                <div className="text-right">
+                                  <div className={`font-bold ${yearInterestGain >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {yearInterestGain >= 0 ? '↗' : '↘'} {yearInterestGain >= 0 ? '+' : ''}{fmtCur.format(yearInterestGain)} d'intérêts
+                                  </div>
+                                  <div className="text-xs text-slate-400">
+                                    + {fmtCur.format(yearDcaAdded)} investis • {yearGainPct >= 0 ? '+' : ''}{(yearGainPct * 100).toFixed(1)}% de rendement
+                                  </div>
+                                </div>
+                              </div>
+                              {/* Calculation explanation */}
+                              <div className="mt-2 text-xs text-slate-500 border-t border-slate-700/50 pt-2">
+                                💡 <span className="text-slate-400">Calcul du rendement :</span>{' '}
+                                {fmtCur.format(yearInterestGain)} d'intérêts ÷ {fmtCur.format(avgCapitalDuringYear)} (capital moyen) = {(yearGainPct * 100).toFixed(1)}%
+                              </div>
+                            </div>
+                            
+                            {/* Monthly details */}
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full text-sm">
+                                <thead className="bg-slate-800/40 text-slate-400">
+                                  <tr>
+                                    <th className="text-left px-3 py-2 text-xs">Mois</th>
+                                    <th className="text-right px-3 py-2 text-xs">💰 Valeur totale</th>
+                                    <th className="text-right px-3 py-2 text-xs">➕ Versement DCA</th>
+                                    <th className="text-right px-3 py-2 text-xs">✨ Intérêts gagnés</th>
+                                    <th className="text-right px-3 py-2 text-xs">📊 Rendement mensuel</th>
+                                    <th className="text-right px-3 py-2 text-xs">💵 Total investi</th>
+                                    <th className="text-right px-3 py-2 text-xs">🎯 Gains totaux</th>
+                                    <th className="text-right px-3 py-2 text-xs">📈 Rendement global</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {monthlyData.map((m, mIdx) => {
+                                    const monthNames = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc']
+                                    const globalMonthIdx = startIdx + mIdx
+                                    return (
+                                      <tr key={m.month} className={mIdx % 2 === 0 ? 'bg-slate-900/30' : 'bg-slate-900/10'}>
+                                        <td className="px-3 py-2 text-slate-200 font-medium">
+                                          {monthNames[m.month - 1]}
+                                        </td>
+                                        <td className="px-3 py-2 text-right text-white font-bold">
+                                          {fmtCur.format(m.value)}
+                                        </td>
+                                        <td className="px-3 py-2 text-right">
+                                          {m.dcaAdded > 0 ? (
+                                            <span className="text-blue-400">+{fmtCur.format(m.dcaAdded)}</span>
+                                          ) : (
+                                            <span className="text-slate-500">—</span>
+                                          )}
+                                        </td>
+                                        <td className={`px-3 py-2 text-right font-medium ${m.interestEarned >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                          {globalMonthIdx === 0 ? (
+                                            <span className="text-slate-500">—</span>
+                                          ) : (
+                                            <span>{m.interestEarned >= 0 ? '+' : ''}{fmtCur.format(m.interestEarned)}</span>
+                                          )}
+                                        </td>
+                                        <td className={`px-3 py-2 text-right ${m.interestPct >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                                          {globalMonthIdx === 0 ? (
+                                            <span className="text-slate-500">—</span>
+                                          ) : (
+                                            <span>{m.interestPct >= 0 ? '+' : ''}{(m.interestPct * 100).toFixed(2)}%</span>
+                                          )}
+                                        </td>
+                                        <td className="px-3 py-2 text-right text-slate-300">
+                                          {fmtCur.format(m.totalInvested)}
+                                        </td>
+                                        <td className={`px-3 py-2 text-right font-medium ${m.totalInterestEarned >= 0 ? 'text-amber-400' : 'text-rose-400'}`}>
+                                          {m.totalInterestEarned >= 0 ? '+' : ''}{fmtCur.format(m.totalInterestEarned)}
+                                        </td>
+                                        <td className="px-3 py-2 text-right">
+                                          <span className={`font-bold ${m.totalReturnPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                            {m.totalReturnPct >= 0 ? '+' : ''}{(m.totalReturnPct * 100).toFixed(2)}%
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    )
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                            
+                            {/* Year summary explanation */}
+                            <div className="px-4 py-3 bg-slate-800/30 text-xs text-slate-400 space-y-2">
+                              <div className="flex items-start gap-2">
+                                <span className="text-lg">💡</span>
+                                <div>
+                                  <span className="text-slate-300 font-medium">Comment lire ce tableau :</span>
+                                  <ul className="mt-1 space-y-1 text-slate-400">
+                                    <li>• <span className="text-blue-400">Versement DCA</span> = l'argent que VOUS ajoutez chaque mois</li>
+                                    <li>• <span className="text-emerald-400">Intérêts gagnés</span> = l'argent que LE MARCHÉ vous donne (≈{monthlyRate.toFixed(2)}%/mois en moyenne)</li>
+                                    <li>• <span className="text-amber-400">Gains totaux</span> = Valeur actuelle − Total investi = vos bénéfices nets</li>
+                                  </ul>
+                                </div>
+                              </div>
+                              <div className="border-t border-slate-700/50 pt-2">
+                                {yearInterestGain >= 0 ? (
+                                  <span>
+                                    ✅ <span className="text-emerald-400">Bonne année !</span> Le marché vous a rapporté <span className="text-white font-medium">{fmtCur.format(yearInterestGain)}</span> d'intérêts 
+                                    ({(yearGainPct * 100).toFixed(2)}% de rendement sur votre capital).
+                                    {negativeMonths > 0 && <span className="text-slate-500"> Malgré {negativeMonths} mois de baisse, le bilan annuel reste positif.</span>}
+                                  </span>
+                                ) : (
+                                  <span>
+                                    ⚠️ <span className="text-rose-400">Année difficile.</span> Le marché a fait perdre <span className="text-white font-medium">{fmtCur.format(Math.abs(yearInterestGain))}</span> à votre portefeuille.
+                                    <span className="text-amber-400"> C'est normal ! Les marchés fluctuent, mais sur le long terme ({acgr.toFixed(1)}%/an en moyenne), la tendance est positive.</span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* Final compound interest explanation */}
+                    <div className="mt-4 bg-gradient-to-r from-indigo-900/30 to-purple-900/30 rounded-lg p-4 text-sm">
+                      <div className="font-medium text-indigo-300 mb-2">🧮 Comment fonctionnent les intérêts composés ?</div>
+                      <div className="text-slate-300 space-y-1">
+                        <p>• <span className="text-white">Mois 1</span> : Votre capital de départ génère des intérêts</p>
+                        <p>• <span className="text-white">Mois 2</span> : Ces intérêts sont ajoutés à votre capital → le nouveau total génère plus d'intérêts</p>
+                        <p>• <span className="text-white">Et ainsi de suite...</span> Chaque mois, vous gagnez des intérêts sur vos intérêts précédents !</p>
+                        <p className="mt-2 text-indigo-200">
+                          📌 Résultat : <span className="font-bold">{fmtCur.format(totalContributedInstr)}</span> investi → <span className="font-bold text-emerald-400">{fmtCur.format(endVal)}</span> final
+                          {' '}({totalGainInstr >= 0 ? '+' : ''}{fmtCur.format(totalGainInstr)} de gains, soit {totalGainPctInstr >= 0 ? '+' : ''}{(totalGainPctInstr * 100).toFixed(1)}%)
+                        </p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Rendement du marché (ACGR) : <span className="text-amber-400 font-medium">+{acgr.toFixed(1)}%/an</span> en moyenne sur 10 ans
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )

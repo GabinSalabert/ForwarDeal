@@ -72,7 +72,30 @@ public class SimulationService {
         // DCA schedule handling (frequency: MONTHLY/QUARTERLY/YEARLY)
         int dcaEveryMonths = frequencyToMonths(req.dca() != null ? req.dca().frequency() : null);
 
-        // Add starting point (month 0)
+        // Apply FIRST DCA investment at month 0 (January of year 1) if DCA is enabled
+        // This ensures the user starts investing from day 1, not from the end of month 1
+        if (req.dca() != null && req.dca().amountPerPeriod() > 0) {
+            int investsPerPeriod = Math.max(1, req.dca().periods());
+            double investTotalEur = req.dca().amountPerPeriod() * investsPerPeriod;
+            double investTotalUsd = investTotalEur * eurToUsd;
+            
+            double totalQtyNow = req.positions().stream().mapToDouble(InstrumentPosition::quantity).sum();
+            boolean allZero = totalQtyNow == 0.0;
+            int n = req.positions().size();
+            
+            for (InstrumentPosition p : req.positions()) {
+                double share = allZero ? (n > 0 ? 1.0 / n : 0.0) : p.quantity() / totalQtyNow;
+                double investUsd = investTotalUsd * share;
+                double price = prices.get(p.isin());
+                if (price > 0 && investUsd > 0) {
+                    double addedUnits = investUsd / price;
+                    unitsHeld.put(p.isin(), unitsHeld.get(p.isin()) + addedUnits);
+                    contributed += investTotalEur * share;
+                }
+            }
+        }
+        
+        // Add starting point (month 0) - now includes the first DCA investment
         // total = market value of basket + side capital (cash on the side)
         // All prices are in USD, so portfolio value is in USD. We convert to EUR for display.
         // Note: initialCapital from frontend is actually in USD (calculated from USD prices),
@@ -82,7 +105,7 @@ public class SimulationService {
         // initialCapital is actually in USD from frontend calculation, convert to EUR for tracking
         double initialCapitalUsd = req.initialCapital();
         double initialCapitalEur = initialCapitalUsd * usdToEur;
-        contributed = initialCapitalEur; // Track contributed in EUR for display
+        // contributed already includes initial DCA from above
         portfolio.add(new TimePoint(0, startValueEur, contributed, dividendsPaidCumulative * usdToEur, 0.0));
         for (String isin : perInstrumentPoints.keySet()) {
             double valueUsd = unitsHeld.get(isin) * prices.get(isin);
@@ -90,12 +113,19 @@ public class SimulationService {
             perInstrumentPoints.get(isin).add(new InstrumentSeriesPoint(0, valueEur));
         }
 
-        // Nominal monthly return from ACGR (deterministic growth path per instrument)
-        Map<String, Double> monthlyNominalReturnByIsin = new HashMap<>();
+        // Generate realistic monthly returns with volatility that average to ACGR over the year
+        // We'll create 12-month patterns with ~3 negative months per year while respecting total ACGR
+        Map<String, double[]> monthlyReturnsPattern = new HashMap<>();
+        Random random = new Random(42); // Fixed seed for reproducible simulations
+        
         for (Map.Entry<String, Instrument> e : instrumentMap.entrySet()) {
             Instrument inst = e.getValue();
-            double monthlyNominal = Math.pow(1.0 + inst.getAcgr10(), 1.0 / 12.0) - 1.0;
-            monthlyNominalReturnByIsin.put(e.getKey(), monthlyNominal);
+            double annualReturn = inst.getAcgr10(); // e.g., 0.10 for 10%
+            
+            // Create a pattern of 12 monthly returns that compound to the annual return
+            // We want ~3 negative months per year for realism
+            double[] yearPattern = generateVolatileYearPattern(annualReturn, random);
+            monthlyReturnsPattern.put(e.getKey(), yearPattern);
         }
 
         // If real-terms simulation is requested, convert monthly nominal returns to real by removing inflation
@@ -110,14 +140,17 @@ public class SimulationService {
         for (int m = 1; m <= months; m++) {
             double monthlyDividendsGeneratedTotal = 0.0;
             
-            // First, evolve prices monthly using ACGR-derived monthly returns + fees.
+            // First, evolve prices monthly using volatile monthly returns + fees.
             // This applies to all units held at the start of the month (from previous months).
             for (Map.Entry<String, Instrument> e : instrumentMap.entrySet()) {
                 String isin = e.getKey();
                 Instrument inst = e.getValue();
 
                 double monthlyFee = Math.pow(1.0 - annualFees, 1.0 / 12.0) - 1.0; // negative
-                double monthlyNominal = monthlyNominalReturnByIsin.get(isin);
+                // Get volatile monthly return from pattern (cycles through 12-month pattern)
+                double[] pattern = monthlyReturnsPattern.get(isin);
+                int monthInYear = (m - 1) % 12; // 0-11 index into pattern
+                double monthlyNominal = pattern[monthInYear];
                 // Convert to real monthly return if requested
                 double monthlyEffective = realTerms
                         ? ((1.0 + monthlyNominal) / (1.0 + monthlyInflation)) - 1.0
@@ -229,6 +262,54 @@ public class SimulationService {
     }
 
     // sumValues retained for potential future use (e.g., when attributing dividend cash)
+    
+    /**
+     * Generates a 12-month pattern of returns that:
+     * 1. Compounds to match the target annual return (ACGR)
+     * 2. Includes 2-3 negative months for realism
+     * 3. Has realistic volatility
+     */
+    private static double[] generateVolatileYearPattern(double annualReturn, Random random) {
+        double[] pattern = new double[12];
+        
+        // Base monthly return to achieve annual target
+        double baseMonthly = Math.pow(1.0 + annualReturn, 1.0 / 12.0) - 1.0;
+        
+        // Typical monthly volatility for equity markets is around 4-5%
+        double volatility = 0.04;
+        
+        // Generate random returns with the right average
+        double productSoFar = 1.0;
+        for (int i = 0; i < 11; i++) {
+            // Generate a random return around the base
+            double noise = (random.nextGaussian() * volatility);
+            // Occasionally force a negative month (roughly 3 per year)
+            if (random.nextDouble() < 0.25) {
+                pattern[i] = -Math.abs(baseMonthly + noise) - 0.01; // Ensure negative
+            } else {
+                pattern[i] = baseMonthly + noise;
+            }
+            productSoFar *= (1.0 + pattern[i]);
+        }
+        
+        // Set the last month to make the product equal to (1 + annualReturn)
+        double targetProduct = 1.0 + annualReturn;
+        pattern[11] = (targetProduct / productSoFar) - 1.0;
+        
+        // Shuffle the pattern so negative months aren't always at the same positions
+        shuffleArray(pattern, random);
+        
+        return pattern;
+    }
+    
+    private static void shuffleArray(double[] array, Random random) {
+        for (int i = array.length - 1; i > 0; i--) {
+            int j = random.nextInt(i + 1);
+            double temp = array[i];
+            array[i] = array[j];
+            array[j] = temp;
+        }
+    }
 }
 
 
