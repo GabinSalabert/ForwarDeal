@@ -817,13 +817,21 @@ export default function App() {
                         const yearEndContrib = result.portfolio[endIdx]?.contributed ?? 0
                         const yearDcaAdded = yearEndContrib - yearStartContrib
                         
-                        // Pure interest gain = value change - new contributions
-                        const yearInterestGain = (yearEndVal - yearStartVal) - yearDcaAdded
+                        // Pure gain = value change - new contributions (this is the "variation" due to market)
+                        const yearMarketGain = (yearEndVal - yearStartVal) - yearDcaAdded
+                        
+                        // Calculate yearly dividends (sum of monthly dividends for this year)
+                        let yearDividends = 0
+                        for (let m = 0; m < 12; m++) {
+                          const mIdx = startIdx + m
+                          if (mIdx >= result.portfolio.length) break
+                          yearDividends += result.portfolio[mIdx]?.monthlyDividendsGenerated ?? 0
+                        }
                         
                         // Calculate year return % based on average capital during the year
                         // More accurate than just using start value (which could be 0 with DCA)
                         const avgCapitalDuringYear = (yearStartVal + yearEndVal) / 2
-                        const yearGainPct = avgCapitalDuringYear > 0 ? yearInterestGain / avgCapitalDuringYear : 0
+                        const yearGainPct = avgCapitalDuringYear > 0 ? yearMarketGain / avgCapitalDuringYear : 0
                         
                         // Get monthly data for this year (starting from month 1, not 0)
                         const monthlyData = []
@@ -879,10 +887,13 @@ export default function App() {
                         // Total months actually shown this year
                         const totalMonthsThisYear = monthlyData.length
                         
+                        // Calculate cumulative gains at end of year (for comparison)
+                        const cumulativeGainsEndOfYear = yearEndVal - yearEndContrib
+                        
                         return (
                           <div key={year} className="rounded-lg ring-1 ring-slate-700/40 overflow-hidden">
                             {/* Year header */}
-                            <div className={`px-4 py-3 ${yearInterestGain >= 0 ? 'bg-emerald-900/20' : 'bg-rose-900/20'}`}>
+                            <div className={`px-4 py-3 ${yearMarketGain >= 0 ? 'bg-emerald-900/20' : 'bg-rose-900/20'}`}>
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                   <span className="text-lg font-bold text-white">Année {year}</span>
@@ -892,18 +903,29 @@ export default function App() {
                                   </span>
                                 </div>
                                 <div className="text-right">
-                                  <div className={`font-bold ${yearInterestGain >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                    {yearInterestGain >= 0 ? '↗' : '↘'} {yearInterestGain >= 0 ? '+' : ''}{fmtCur.format(yearInterestGain)} d'intérêts
+                                  <div className={`font-bold ${yearMarketGain >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {yearMarketGain >= 0 ? '↗' : '↘'} {yearMarketGain >= 0 ? '+' : ''}{fmtCur.format(yearMarketGain)} cette année
                                   </div>
                                   <div className="text-xs text-slate-400">
-                                    + {fmtCur.format(yearDcaAdded)} investis • {yearGainPct >= 0 ? '+' : ''}{(yearGainPct * 100).toFixed(1)}% de rendement
+                                    + {fmtCur.format(yearDcaAdded)} investis • {yearGainPct >= 0 ? '+' : ''}{(yearGainPct * 100).toFixed(1)}% de rendement annuel
+                                  </div>
+                                  <div className="text-xs text-amber-400 mt-1">
+                                    📊 Gains cumulés fin d'année : {fmtCur.format(cumulativeGainsEndOfYear)}
                                   </div>
                                 </div>
                               </div>
                               {/* Calculation explanation */}
-                              <div className="mt-2 text-xs text-slate-500 border-t border-slate-700/50 pt-2">
-                                💡 <span className="text-slate-400">Calcul du rendement :</span>{' '}
-                                {fmtCur.format(yearInterestGain)} d'intérêts ÷ {fmtCur.format(avgCapitalDuringYear)} (capital moyen) = {(yearGainPct * 100).toFixed(1)}%
+                              <div className="mt-2 text-xs text-slate-500 border-t border-slate-700/50 pt-2 space-y-1">
+                                <div>
+                                  💡 <span className="text-slate-400">Calcul des gains de l'année :</span>{' '}
+                                  ({fmtCur.format(yearEndVal)} fin − {fmtCur.format(yearStartVal)} début) − {fmtCur.format(yearDcaAdded)} versés = <span className="text-white">{fmtCur.format(yearMarketGain)}</span>
+                                </div>
+                                {yearDividends > 0 && (
+                                  <div>
+                                    💜 <span className="text-purple-400">Dividendes réinvestis cette année : {fmtCur.format(yearDividends)}</span>
+                                    <span className="text-slate-500 ml-1">(inclus dans les gains, réinvestis automatiquement par le fonds)</span>
+                                  </div>
+                                )}
                               </div>
                             </div>
                             
@@ -915,11 +937,11 @@ export default function App() {
                                     <th className="text-left px-3 py-2 text-xs">Mois</th>
                                     <th className="text-right px-3 py-2 text-xs">💰 Valeur totale</th>
                                     <th className="text-right px-3 py-2 text-xs">➕ Versement DCA</th>
-                                    <th className="text-right px-3 py-2 text-xs">✨ Intérêts gagnés</th>
-                                    <th className="text-right px-3 py-2 text-xs">📊 Rendement mensuel</th>
-                                    <th className="text-right px-3 py-2 text-xs">💵 Total investi</th>
-                                    <th className="text-right px-3 py-2 text-xs">🎯 Gains totaux</th>
-                                    <th className="text-right px-3 py-2 text-xs">📈 Rendement global</th>
+                                    <th className="text-right px-3 py-2 text-xs">📊 Variation</th>
+                                    <th className="text-right px-3 py-2 text-xs">📈 Rendement</th>
+                                    <th className="text-right px-3 py-2 text-xs">💵 Investi (cumulé)</th>
+                                    <th className="text-right px-3 py-2 text-xs">🎯 Gains (cumulés)</th>
+                                    <th className="text-right px-3 py-2 text-xs">📈 Rendement total</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -980,22 +1002,26 @@ export default function App() {
                                 <div>
                                   <span className="text-slate-300 font-medium">Comment lire ce tableau :</span>
                                   <ul className="mt-1 space-y-1 text-slate-400">
-                                    <li>• <span className="text-blue-400">Versement DCA</span> = l'argent que VOUS ajoutez chaque mois</li>
-                                    <li>• <span className="text-emerald-400">Intérêts gagnés</span> = l'argent que LE MARCHÉ vous donne (≈{monthlyRate.toFixed(2)}%/mois en moyenne)</li>
-                                    <li>• <span className="text-amber-400">Gains totaux</span> = Valeur actuelle − Total investi = vos bénéfices nets</li>
+                                    <li>• <span className="text-blue-400">Versement DCA</span> = l'argent que VOUS ajoutez ce mois</li>
+                                    <li>• <span className="text-emerald-400">Variation</span> = hausse/baisse du marché ce mois (≈{monthlyRate.toFixed(2)}%/mois en moyenne)</li>
+                                    <li>• <span className="text-amber-400">Gains (cumulés)</span> = tous vos gains depuis le début (pas juste cette année !)</li>
                                   </ul>
+                                  <div className="mt-2 text-xs text-slate-500 border-l-2 border-slate-600 pl-2">
+                                    ⚠️ Ne confondez pas : l'en-tête montre les <span className="text-white">gains de l'année</span>, 
+                                    la colonne montre les <span className="text-amber-400">gains cumulés</span> depuis le début.
+                                  </div>
                                 </div>
                               </div>
                               <div className="border-t border-slate-700/50 pt-2">
-                                {yearInterestGain >= 0 ? (
+                                {yearMarketGain >= 0 ? (
                                   <span>
-                                    ✅ <span className="text-emerald-400">Bonne année !</span> Le marché vous a rapporté <span className="text-white font-medium">{fmtCur.format(yearInterestGain)}</span> d'intérêts 
+                                    ✅ <span className="text-emerald-400">Bonne année !</span> Le marché vous a rapporté <span className="text-white font-medium">{fmtCur.format(yearMarketGain)}</span> de gains 
                                     ({(yearGainPct * 100).toFixed(2)}% de rendement sur votre capital).
                                     {negativeMonths > 0 && <span className="text-slate-500"> Malgré {negativeMonths} mois de baisse, le bilan annuel reste positif.</span>}
                                   </span>
                                 ) : (
                                   <span>
-                                    ⚠️ <span className="text-rose-400">Année difficile.</span> Le marché a fait perdre <span className="text-white font-medium">{fmtCur.format(Math.abs(yearInterestGain))}</span> à votre portefeuille.
+                                    ⚠️ <span className="text-rose-400">Année difficile.</span> Le marché a fait perdre <span className="text-white font-medium">{fmtCur.format(Math.abs(yearMarketGain))}</span> à votre portefeuille.
                                     <span className="text-amber-400"> C'est normal ! Les marchés fluctuent, mais sur le long terme ({acgr.toFixed(1)}%/an en moyenne), la tendance est positive.</span>
                                   </span>
                                 )}

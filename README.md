@@ -34,12 +34,26 @@ Simulate long‑term investments on baskets of ISINs (stocks/ETFs) with DCA, div
 - ⚖️ License
 
 ## ✨ Features
-- 📈 ACGR‑driven growth per instrument (10‑year compound annual growth rate)
-- 💸 DCA: amount, frequency, and investments per period
-- 🪙 Dividend policies: Accumulating vs Distributing (bars for yearly sums)
-- 🧾 Fees: value‑weighted (%/yr) auto‑filled from instruments’ expense ratios
-- 🌓 Nominal vs Real (inflation FR) toggle
-- 🔍 Search and sort instruments (by ACGR / A‑Z), real‑time price snapshot
+
+### Realistic simulation
+- 📈 **ACGR-based growth** (10-year compound annual growth rate)
+- 📊 **Realistic volatility**: ~3 down months per year while respecting the ACGR
+- 💸 **DCA**: amount, frequency, investments per period (first investment from month 0)
+- 🪙 **Dividends**: Accumulating vs Distributing (bars for yearly sums)
+- 🧾 **Fees**: value-weighted (%/yr) auto-filled from expense ratios
+- 🌓 **Nominal vs Real**: toggle to see FR inflation impact
+
+### Pedagogical interface (for beginners)
+- 💡 **Detailed explanations** for each calculation (return, gains, dividends)
+- 📊 **Monthly table** with variation, DCA contributions, cumulative gains
+- 🎯 **Clear distinction**: yearly gains vs cumulative gains since start
+- 📈📉 **Visual counter**: X months up / Y months down per year
+- 💜 **Reinvested dividends** explained in each year's header
+- ⚠️ **Educational warnings**: why DCA return ≠ market ACGR
+
+### Search & display
+- 🔍 Search and sort instruments (by ACGR / A-Z)
+- 💰 Real-time prices, automatic EUR/USD conversion
 
 ## 🏗️ Architecture
 **Backend** (Java 21, Spring Boot 3)
@@ -52,13 +66,39 @@ Simulate long‑term investments on baskets of ISINs (stocks/ETFs) with DCA, div
 - Right panel (fixed): interactive composed chart with gradients, dashed cash curve, yearly dividend bars.
 
 ## 🧠 Simulation model
-- Monthly nominal return per instrument: \( r_m = (1+ACGR)^{1/12} - 1 \)
-- REAL mode: \( r_m^{real} = \frac{1+r_m}{1+i_m} - 1 \) with \( i_m = (1+inflation)^{1/12} - 1 \)
-- Fees monthly factor: \( f_m = (1 - fee_{yr})^{1/12} - 1 \)
-- Price update: `price *= (1 + r_effective) * (1 + f_m)`
-- Dividends: ACGR already includes total return. To avoid double counting we do NOT add dividends to value (accumulating does not add units; distributing tracked only for yearly bars).
-- DCA: at each checkpoint, invest `amountPerPeriod × periods` (equal split if starting quantities are all 0, else proportional to initial quantities).
-- Contributed stays nominal (including in REAL mode). Cash curve is deflated by cumulative FR inflation.
+
+### Realistic volatility
+Monthly returns are **not constant** — they simulate real market volatility:
+- Each year generates 12 monthly returns with ~3 negative months
+- Monthly volatility is around 4% (typical for equity markets)
+- The product of 12 monthly returns = exactly the annual ACGR
+
+```
+Example for ACGR = 10%/yr:
+Jan: +2.1%, Feb: -1.8%, Mar: +3.2%, Apr: -0.5%, May: +1.9%, ...
+→ Final product = 1.10 (10% annual respected)
+```
+
+### Formulas
+- **Monthly nominal return**: \( r_m = (1+ACGR)^{1/12} - 1 \) (base, then variance added)
+- **REAL mode**: \( r_m^{real} = \frac{1+r_m}{1+i_m} - 1 \) with \( i_m = (1+inflation)^{1/12} - 1 \)
+- **Monthly fees**: \( f_m = (1 - fee_{yr})^{1/12} - 1 \)
+- **Price update**: `price *= (1 + r_volatile) * (1 + f_m)`
+
+### DCA (Dollar-Cost Averaging)
+- The **first DCA investment is made at month 0** (January of year 1)
+- Then, investments according to chosen frequency (monthly/quarterly/yearly)
+- Equal split if initial quantities = 0, otherwise proportional to quantities
+
+### Dividends
+- ACGR already includes total return (price + dividends)
+- For **accumulating** funds: dividends automatically reinvested (included in value)
+- For **distributing** funds: dividends tracked separately for display
+
+### Pedagogical display
+- **Yearly gains** vs **Cumulative gains** clearly distinguished
+- Explanation of each metric calculation
+- Up/down months visually counted
 
 ## 🎛️ Parameters
 - Basket (ISIN + quantity at t0, can be 0)
@@ -75,29 +115,44 @@ Simulate long‑term investments on baskets of ISINs (stocks/ETFs) with DCA, div
 4) UI renders Total, Contributed, Cash (real), and yearly dividend bars.
 
 ## 🚀 Run locally
-Prereqs: Java 21 • Maven • Node 18+
 
-Backend
+### Prerequisites
+- **Java 21** — [Download here](https://www.oracle.com/java/technologies/downloads/#java21)
+- **Maven** or **Maven Daemon (mvnd)** — [mvnd recommended](https://github.com/apache/maven-mvnd/releases) (2-10x faster)
+- **Node 18+** — for frontend build
+
+### Launch (monolithic architecture)
+The frontend is compiled and served directly by the Spring Boot backend on the **same port**.
+
 ```bash
+# With Maven Daemon (recommended, faster)
+mvnd spring-boot:run
+
+# OR with classic Maven
 mvn -q -DskipTests spring-boot:run
-# Swagger UI → http://localhost:8080/swagger-ui/index.html
 ```
 
-Frontend
+📍 **Application available at**: http://localhost:8080
+
+> The React frontend is automatically copied to `target/classes/static/` during Maven build.
+
+### Frontend build (if modifications)
 ```bash
 cd frontend
-npm install
-npm run dev -- --port 5210 --strictPort --host
-# Open http://localhost:5210/
+npm install        # first time only
+npm run build      # generates dist/
 ```
+Then restart `mvnd spring-boot:run` to integrate changes.
 
-> CORS is enabled for `http://localhost:*` and `http://127.0.0.1:*` during development.
+### Swagger UI (API documentation)
+http://localhost:8080/swagger-ui/index.html
 
 ## 🧰 Tooling — what and why
-- Maven (backend build & run)
-  - What it is: the de‑facto Java build tool and dependency manager.
+- Maven / Maven Daemon (backend build & run)
+  - What it is: the de‑facto Java build tool and dependency manager. **Maven Daemon (mvnd)** is an optimized version that keeps a JVM running in background for 2-10x faster builds.
   - Why we use it: it fetches Spring/HTTP/validation libraries, compiles the code, and runs the app via the Spring Boot Maven Plugin.
-  - Typical commands: `mvn -q -DskipTests spring-boot:run`, `mvn package`.
+  - Typical commands: `mvnd spring-boot:run` (recommended) or `mvn -q -DskipTests spring-boot:run`, `mvn package`.
+  - Installation mvnd: [github.com/apache/maven-mvnd/releases](https://github.com/apache/maven-mvnd/releases)
 
 - Node.js (frontend runtime & tooling)
   - What it is: a JavaScript runtime used to execute tooling (npm) and dev servers.
@@ -153,12 +208,46 @@ docs/                                  # Documentation assets (add simulation-ex
 ```
 
 ## 🧭 Example scenario
-1. Add “iShares MSCI ACWI ETF” and “iShares MSCI World ETF”.
-2. Set DCA amount = 1200, investments per period = 1, frequency = Monthly, horizon = 15 years.
-3. Leave Fees (%/yr) auto‑filled. Click “Simulate”.
-4. Toggle REAL to visualize purchasing‑power effects.
 
-![Simulation example](https://i.postimg.cc/YCkqK3vy/Capture-d-e-cran-2025-10-12-a-18-44-07.png)
+### Simulation: €2,000/month on MSCI World for 4 years
+
+1. **Add** "iShares MSCI World ETF" to basket (initial quantity = 0)
+2. **Configure**:
+   - DCA: €2,000/month
+   - Frequency: Monthly
+   - Horizon: 4 years
+3. **Run** the simulation
+
+### Expected result (ACGR ~10%/yr)
+
+| Metric | Value |
+|--------|-------|
+| 💰 Total invested | €96,000 |
+| 🎯 Final value | ~€116,000 |
+| ✨ Total gains | ~€20,000 (+21%) |
+| 📈 Average annual return | ~4.8%/yr* |
+
+> *Personal return (~4.8%) is lower than market ACGR (10%) because with DCA, your money isn't invested for the entire duration. The first contribution benefits from 4 years of growth, but the last one only a few months.
+
+### A realistic chart, with the option to account for inflation (Nominal => Real)!
+
+- 📊 **Realistic volatility**: ~3 down months per year (red)
+- 💜 **Reinvested dividends**: displayed in each year's header
+- 📈 **Cumulative gains** vs **Yearly gains**: clearly distinguished
+- 💡 **Pedagogical explanations**: detailed calculations for each metric
+
+![Simulation example](https://i.postimg.cc/nzRgt2YT/image.png)
+
+### A perfectly detailed data grid for each year!
+
+1. Header - Global
+![Simulation example](https://i.postimg.cc/3xNPnPX8/image.png)
+
+2. Year 1 - Detailed:
+![Simulation example](https://i.postimg.cc/nrnW75Vm/image.png)
+
+3. Year 4 - Bottom
+![Simulation example](https://i.postimg.cc/x1X4KLQt/image.png)
 
 ## ⚖️ License
 MIT
