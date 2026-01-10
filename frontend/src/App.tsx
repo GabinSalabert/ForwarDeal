@@ -164,29 +164,21 @@ export default function App() {
       // also include each instrument series so stacking still works
       ...Object.fromEntries(result.instruments.map(s => [s.isin, s.points[p.monthIndex]?.value ?? 0]))
     })) as ChartRow[]
-    // Compute cash as pure accumulation: side capital + contributions (no interest, no inflation)
+    // Compute cash as pure accumulation: side capital + contributions (no interest)
+    // This represents what you would have if you kept the money under your mattress
     const annualInflation = inflation
     const monthlyInflFactor = Math.pow(1 + annualInflation, 1 / 12)
-    let realCash = sideCapital
-    let prevContrib = result.portfolio[0]?.contributed ?? 0
+    
     for (let idx = 0; idx < base.length; idx++) {
       const p = result.portfolio[idx]
-      const deltaContrib = Math.max(0, p.contributed - prevContrib) // only new DCA adds to cash
-      if (idx === 0) {
-        base[idx].cashReal = sideCapital
-      } else {
-        realCash = realCash + deltaContrib
-        base[idx].cashReal = showReal ? realCash / Math.pow(monthlyInflFactor, idx) : realCash
-      }
-      prevContrib = p.contributed
+      // Cash = sideCapital + all contributions made so far (contributed already includes everything)
+      const nominalCash = sideCapital + p.contributed
+      // In real mode, deflate cash by cumulative inflation to show purchasing power loss
+      base[idx].cashReal = showReal ? nominalCash / Math.pow(monthlyInflFactor, idx) : nominalCash
     }
-    // Optional real-terms view: deflate basket totals by cumulative inflation (cash handled above; contributed stays nominal)
-    if (showReal) {
-      for (let idx = 0; idx < base.length; idx++) {
-        const cf = Math.pow(monthlyInflFactor, idx)
-        base[idx].total = base[idx].total / cf
-      }
-    }
+    
+    // NOTE: We do NOT deflate 'total' here anymore because the backend already handles real terms
+    // when realTerms=showReal is passed. The backend applies real returns to prices directly.
     const lastMonth = result.portfolio[result.portfolio.length - 1]?.monthIndex ?? 0
     const yrs = Math.floor(lastMonth / 12)
     // sum monthlyDivs over each year and annotate the year-end row
@@ -554,7 +546,23 @@ export default function App() {
                   <CartesianGrid stroke="#1f2937" strokeOpacity={0.8} vertical={false} />
                   <XAxis dataKey="month" tickFormatter={(m) => (m % 12 === 0 ? `${m/12}y` : '')} interval={0} tick={{ fill: '#94a3b8', fontSize: 12 }} tickLine={false} axisLine={false} />
                   <YAxis yAxisId="left" tickFormatter={(v) => fmt.format(Number(v))} tick={{ fill: '#94a3b8', fontSize: 12 }} tickLine={false} axisLine={false} />
-                  <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => fmt.format(Number(v))} tick={{ fill: '#94a3b8', fontSize: 12 }} tickLine={false} axisLine={false} />
+                  {/* Right axis for dividends - scaled so bars reach ~50% of contributed curve height */}
+                  <YAxis 
+                    yAxisId="right" 
+                    orientation="right" 
+                    domain={[0, () => {
+                      // Find max yearly dividend and max contributed
+                      const maxDividend = Math.max(...chartData.filter(d => d.yearlyDivs).map(d => d.yearlyDivs || 0), 1)
+                      const maxContributed = Math.max(...chartData.map(d => d.contributed || 0), 1)
+                      // We want: maxDividend bar height = 50% of maxContributed
+                      // Bar height ratio = value / domain_max
+                      // So: maxDividend / domain_max = 0.5 * (maxContributed / left_axis_max)
+                      // Assuming left_axis_max ≈ maxTotal, and maxContributed ≈ 0.8 * maxTotal
+                      // Simplified: domain_max = maxDividend * 2.5 makes bars ~40% of chart height
+                      return maxDividend * 2.5
+                    }]}
+                    hide={true}
+                  />
                   <Tooltip contentStyle={{ backgroundColor: '#0b1220', border: '1px solid #1f2937', borderRadius: 10, color: '#e5e7eb' }} labelFormatter={(m) => (Number(m) % 12 === 0 ? `${Number(m)/12} years` : `Month ${m}`)} formatter={(val: any) => fmt.format(Number(val))} />
                   <Legend iconType="circle" wrapperStyle={{ color: '#a1a1aa', fontSize: 12 }} />
 
@@ -564,9 +572,9 @@ export default function App() {
                   {/* Cash DCA (real, after inflation) */}
                   <Area yAxisId="left" type="monotone" dataKey="cashReal" stroke="#ef4444" strokeWidth={2} strokeDasharray="4 3" dot={false} fillOpacity={0} name="Cash (real, FR inflation)" />
 
-                  {/* Yearly dividends (sum of monthly) shown as bars on the right axis with value labels */}
-                  <Bar yAxisId="right" dataKey="yearlyDivs" name="Yearly dividends (sum)" fill="url(#grad-bar)" barSize={16} radius={[6, 6, 0, 0]}>
-                    <LabelList dataKey="yearlyDivs" position="top" formatter={(v: any) => fmt.format(Number(v))} fill="#c4b5fd" />
+                  {/* Yearly dividends shown as bars on right axis - scaled for visibility */}
+                  <Bar yAxisId="right" dataKey="yearlyDivs" name="Yearly dividends (sum)" fill="url(#grad-bar)" barSize={20} radius={[6, 6, 0, 0]}>
+                    <LabelList dataKey="yearlyDivs" position="top" formatter={(v: any) => fmt.format(Number(v))} fill="#c4b5fd" fontSize={10} />
                   </Bar>
                   </ComposedChart>
                 </ResponsiveContainer>
@@ -875,8 +883,11 @@ export default function App() {
                           })
                         }
                         
-                        // Count positive/negative months (skip month 0 which has no interest yet)
-                        const monthsWithData = monthlyData.slice(1) // Skip first month (initial investment)
+                        // Count positive/negative months
+                        // Only skip the very first month (global index 0) which has no interest yet
+                        // For year 2, 3, 4 etc., all 12 months have interest data
+                        const isFirstYear = year === 1
+                        const monthsWithData = isFirstYear ? monthlyData.slice(1) : monthlyData
                         const positiveMonths = monthsWithData.filter(m => m.interestEarned > 0.01).length
                         const negativeMonths = monthsWithData.filter(m => m.interestEarned < -0.01).length
                         const neutralMonths = monthsWithData.filter(m => Math.abs(m.interestEarned) <= 0.01).length

@@ -236,7 +236,7 @@ docs/                                  # Documentation assets (add simulation-ex
 - 📈 **Cumulative gains** vs **Yearly gains**: clearly distinguished
 - 💡 **Pedagogical explanations**: detailed calculations for each metric
 
-![Simulation example](https://i.postimg.cc/nzRgt2YT/image.png)
+![Simulation example](https://i.postimg.cc/B67hLvzw/image.png)
 
 ### A perfectly detailed data grid for each year!
 

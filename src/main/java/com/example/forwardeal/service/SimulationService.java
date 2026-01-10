@@ -114,18 +114,24 @@ public class SimulationService {
         }
 
         // Generate realistic monthly returns with volatility that average to ACGR over the year
-        // We'll create 12-month patterns with ~3 negative months per year while respecting total ACGR
-        Map<String, double[]> monthlyReturnsPattern = new HashMap<>();
+        // Each YEAR gets a DIFFERENT pattern, but the product of 12 months = ACGR (respected)
+        // Use a seeded random for reproducibility, but vary patterns by year
         Random random = new Random(42); // Fixed seed for reproducible simulations
+        
+        // Pre-generate patterns for each year and each instrument
+        int totalYears = (months / 12) + 1;
+        Map<String, double[][]> yearlyPatternsPerInstrument = new HashMap<>();
         
         for (Map.Entry<String, Instrument> e : instrumentMap.entrySet()) {
             Instrument inst = e.getValue();
             double annualReturn = inst.getAcgr10(); // e.g., 0.10 for 10%
             
-            // Create a pattern of 12 monthly returns that compound to the annual return
-            // We want ~3 negative months per year for realism
-            double[] yearPattern = generateVolatileYearPattern(annualReturn, random);
-            monthlyReturnsPattern.put(e.getKey(), yearPattern);
+            // Create a DIFFERENT pattern for each year
+            double[][] patternsForAllYears = new double[totalYears][12];
+            for (int y = 0; y < totalYears; y++) {
+                patternsForAllYears[y] = generateVolatileYearPattern(annualReturn, random);
+            }
+            yearlyPatternsPerInstrument.put(e.getKey(), patternsForAllYears);
         }
 
         // If real-terms simulation is requested, convert monthly nominal returns to real by removing inflation
@@ -147,10 +153,11 @@ public class SimulationService {
                 Instrument inst = e.getValue();
 
                 double monthlyFee = Math.pow(1.0 - annualFees, 1.0 / 12.0) - 1.0; // negative
-                // Get volatile monthly return from pattern (cycles through 12-month pattern)
-                double[] pattern = monthlyReturnsPattern.get(isin);
+                // Get volatile monthly return from the pattern for THIS SPECIFIC YEAR
+                double[][] allYearPatterns = yearlyPatternsPerInstrument.get(isin);
+                int yearIndex = (m - 1) / 12; // 0 for year 1, 1 for year 2, etc.
                 int monthInYear = (m - 1) % 12; // 0-11 index into pattern
-                double monthlyNominal = pattern[monthInYear];
+                double monthlyNominal = allYearPatterns[yearIndex][monthInYear];
                 // Convert to real monthly return if requested
                 double monthlyEffective = realTerms
                         ? ((1.0 + monthlyNominal) / (1.0 + monthlyInflation)) - 1.0
@@ -266,11 +273,25 @@ public class SimulationService {
     /**
      * Generates a 12-month pattern of returns that:
      * 1. Compounds to match the target annual return (ACGR)
-     * 2. Includes 2-3 negative months for realism
+     * 2. Includes a RANDOM number of negative months (2-5) for realism
      * 3. Has realistic volatility
      */
     private static double[] generateVolatileYearPattern(double annualReturn, Random random) {
         double[] pattern = new double[12];
+        
+        // Randomly decide how many negative months this year (2-5)
+        int numNegativeMonths = 2 + random.nextInt(4); // 2, 3, 4, or 5
+        
+        // Decide which months will be negative (random positions)
+        boolean[] isNegative = new boolean[12];
+        int negativeCount = 0;
+        while (negativeCount < numNegativeMonths) {
+            int idx = random.nextInt(11); // Don't set last month as we need it for adjustment
+            if (!isNegative[idx]) {
+                isNegative[idx] = true;
+                negativeCount++;
+            }
+        }
         
         // Base monthly return to achieve annual target
         double baseMonthly = Math.pow(1.0 + annualReturn, 1.0 / 12.0) - 1.0;
@@ -278,15 +299,15 @@ public class SimulationService {
         // Typical monthly volatility for equity markets is around 4-5%
         double volatility = 0.04;
         
-        // Generate random returns with the right average
+        // Generate returns: positive months get positive returns, negative months get negative
         double productSoFar = 1.0;
         for (int i = 0; i < 11; i++) {
-            // Generate a random return around the base
-            double noise = (random.nextGaussian() * volatility);
-            // Occasionally force a negative month (roughly 3 per year)
-            if (random.nextDouble() < 0.25) {
-                pattern[i] = -Math.abs(baseMonthly + noise) - 0.01; // Ensure negative
+            double noise = Math.abs(random.nextGaussian() * volatility);
+            if (isNegative[i]) {
+                // Negative month: between -1% and -6%
+                pattern[i] = -(0.01 + random.nextDouble() * 0.05);
             } else {
+                // Positive month: base + some noise
                 pattern[i] = baseMonthly + noise;
             }
             productSoFar *= (1.0 + pattern[i]);
@@ -296,7 +317,7 @@ public class SimulationService {
         double targetProduct = 1.0 + annualReturn;
         pattern[11] = (targetProduct / productSoFar) - 1.0;
         
-        // Shuffle the pattern so negative months aren't always at the same positions
+        // Shuffle to mix positions further
         shuffleArray(pattern, random);
         
         return pattern;
