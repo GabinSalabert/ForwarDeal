@@ -34,8 +34,11 @@ WORKDIR /app
 # Copy the built JAR from build stage
 COPY --from=build /app/target/forwardeal-0.0.1-SNAPSHOT.jar app.jar
 
+# Ensure proper permissions
+RUN chmod -R 755 /app
+
 # Expose port (Railway will set PORT env var)
 EXPOSE 8080
 
-# Start the application
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Start the application with dynamic port
+CMD java -jar app.jar --server.port=${PORT:-8080}
