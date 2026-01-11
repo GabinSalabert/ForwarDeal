@@ -1,0 +1,28 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+*.iml
+.vscode
+
+# Build outputs
+target/
+frontend/node_modules/
+frontend/dist/
+frontend/node/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Config files not needed in Docker
+*.md
+nixpacks.toml
+railway.json
+Procfile
+system.properties
