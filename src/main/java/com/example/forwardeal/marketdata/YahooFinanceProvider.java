@@ -52,7 +52,7 @@ public class YahooFinanceProvider implements MarketDataProvider {
             for (UniverseListLoader.SymbolItem item : all) {
                 tasks.add(() -> {
                     try {
-                        return fetchFor(item.isin(), item.symbol(), item.name(), item.acgrHint());
+                        return fetchFor(item.isin(), item.symbol(), item.name(), item.acgrHint(), item.priceHint());
                     } catch (Exception ignored) {
                         double est = estimateTenYearCagr(item.symbol());
                         if (item.acgrHint() != null && item.acgrHint() > -0.5 && item.acgrHint() < 1.0) {
@@ -61,7 +61,9 @@ public class YahooFinanceProvider implements MarketDataProvider {
                         double yield = defaultYieldForSymbol(item.symbol());
                         DividendPolicy policy = yield > 0.0001 ? DividendPolicy.DISTRIBUTING : DividendPolicy.ACCUMULATING;
                         double er = defaultExpenseRatio(item.symbol(), item.name());
-                        return new MarketInstrumentData(item.isin(), item.name(), item.symbol(), 1.0, est, yield, er, policy);
+                        // Use priceHint as fallback instead of 1.0
+                        double fallbackPrice = (item.priceHint() != null && item.priceHint() > 0) ? item.priceHint() : 1.0;
+                        return new MarketInstrumentData(item.isin(), item.name(), item.symbol(), fallbackPrice, est, yield, er, policy);
                     }
                 });
             }
@@ -83,9 +85,13 @@ public class YahooFinanceProvider implements MarketDataProvider {
         }
     }
 
-    private MarketInstrumentData fetchFor(String isin, String symbol, String displayName, Double acgrHint) {
+    private MarketInstrumentData fetchFor(String isin, String symbol, String displayName, Double acgrHint, Double priceHint) {
         // Current price and ACGR10 (10-year CAGR)
         double price = fetchCurrentPrice(symbol);
+        // Use priceHint as fallback if API returned 1.0 (failure indicator)
+        if (price <= 1.0 && priceHint != null && priceHint > 0) {
+            price = priceHint;
+        }
         double tenYearCagr = computeTenYearCagrFromMonthly(symbol);
         if (!Double.isFinite(tenYearCagr)) tenYearCagr = estimateTenYearCagr(symbol);
         // Use curated hint when online data is missing, clearly default-like, or implausible

@@ -10,14 +10,14 @@ import java.util.List;
 
 /**
  * Utility to load a curated list of symbols from classpath CSV files.
- * CSV format: isin,symbol,name
+ * CSV format: isin,symbol,name,acgr10_hint,price_hint
  * - Header is optional
  * - Lines starting with '#' are ignored
  * - If ISIN is blank, the loader will substitute the symbol as the identifier
  */
 public final class UniverseListLoader {
 
-    public record SymbolItem(String isin, String symbol, String name, Double acgrHint) {}
+    public record SymbolItem(String isin, String symbol, String name, Double acgrHint, Double priceHint) {}
 
     public static List<SymbolItem> load(String resourcePath) {
         List<SymbolItem> items = new ArrayList<>();
@@ -41,15 +41,22 @@ public final class UniverseListLoader {
                     String symbol = parts[1].trim();
                     String name = parts.length >= 3 ? parts[2].trim() : symbol;
                     Double acgrHint = null;
+                    Double priceHint = null;
                     if (parts.length >= 4) {
                         try {
                             String v = parts[3].trim();
                             if (!v.isEmpty()) acgrHint = Double.parseDouble(v);
                         } catch (Exception ignored) {}
                     }
+                    if (parts.length >= 5) {
+                        try {
+                            String v = parts[4].trim();
+                            if (!v.isEmpty()) priceHint = Double.parseDouble(v);
+                        } catch (Exception ignored) {}
+                    }
                     if (isin.isEmpty()) isin = symbol; // fallback: use symbol as identifier when ISIN not provided
                     if (!symbol.isEmpty()) {
-                        items.add(new SymbolItem(isin, symbol, name.isEmpty() ? symbol : name, acgrHint));
+                        items.add(new SymbolItem(isin, symbol, name.isEmpty() ? symbol : name, acgrHint, priceHint));
                     }
                 }
             }
