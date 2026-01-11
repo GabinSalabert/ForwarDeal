@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["jdk21", "maven", "nodejs_20"]
+
+[phases.build]
+cmds = ["mvn -DskipTests package"]
+
+[start]
+cmd = "java -jar target/forwardeal-0.0.1-SNAPSHOT.jar"

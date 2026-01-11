@@ -1,11 +1,9 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS",
-    "buildCommand": "mvn -DskipTests package"
+    "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "java -jar target/forwardeal-0.0.1-SNAPSHOT.jar",
     "healthcheckPath": "/api/instruments",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
