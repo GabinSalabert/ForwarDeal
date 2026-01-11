@@ -49,7 +49,9 @@ type ChartRow = {
 }
 
 // Base URL for backend API (same machine during local development)
-const API_BASE = 'http://localhost:8080/api'
+// Use relative URL - works both locally (served by Spring Boot) and in production (Railway)
+// For separate frontend dev server (npm run dev), configure proxy in vite.config.ts
+const API_BASE = '/api'
 
 export default function App() {
   // Remote lists and local UI state
