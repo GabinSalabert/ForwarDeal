@@ -321,11 +321,11 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen p-6 bg-slate-950 text-slate-100">
-      {/* Content grid: left pane scrollable, right pane fixed chart */}
-      <div className="grid gap-6 grid-cols-1 xl:grid-cols-[500px_minmax(0,1fr)]">
-        {/* LEFT PANE: scrollable */}
-        <div className="xl:h-[calc(100vh-3rem)] overflow-y-auto custom-scroll space-y-6 pr-1">
+    <div className="min-h-screen p-3 sm:p-6 bg-slate-950 text-slate-100">
+      {/* Content grid: stacked on mobile, side-by-side on desktop */}
+      <div className="flex flex-col lg:flex-row gap-4 sm:gap-6 lg:h-[calc(100vh-3rem)]">
+        {/* LEFT PANE: scrollable, full width on mobile */}
+        <div className="w-full lg:w-[420px] xl:w-[500px] lg:flex-shrink-0 lg:overflow-y-auto custom-scroll space-y-4 sm:space-y-6 lg:pr-1">
           <section className="bg-slate-900/70 backdrop-blur rounded-xl shadow-sm ring-1 ring-slate-700/50 p-5">
             <h2 className="font-semibold text-lg mb-4 text-slate-50">Instruments</h2>
             {/* Modern search bar */}
@@ -449,22 +449,23 @@ export default function App() {
           </section>
         </div>
 
-        {/* RIGHT PANE: chart (fills viewport height) */}
-        <div className="xl:h-[calc(100vh-3rem)] bg-slate-900/70 backdrop-blur rounded-xl shadow-sm ring-1 ring-slate-700/50 p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="font-semibold text-lg text-slate-50">Evolution</h2>
-            <div className="flex items-center gap-2">
+        {/* RIGHT PANE: chart (fills viewport height on desktop, fixed height on mobile) */}
+        <div className="flex-1 min-h-[400px] sm:min-h-[500px] lg:min-h-0 bg-slate-900/70 backdrop-blur rounded-xl shadow-sm ring-1 ring-slate-700/50 p-3 sm:p-4 flex flex-col">
+          {/* Header with controls - responsive layout */}
+          <div className="mb-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0">
+            <h2 className="font-semibold text-base sm:text-lg text-slate-50">Evolution</h2>
+            <div className="flex flex-wrap items-center gap-2">
               {/* Tabs: Chart | Data */}
               <div className="flex items-center bg-slate-800/50 rounded-lg p-0.5 ring-1 ring-slate-700/60">
                 <button
                   onClick={() => setActiveTab('chart')}
-                  className={`px-3 h-8 rounded-md text-xs font-medium transition ${activeTab === 'chart' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:text-white'}`}
+                  className={`px-2 sm:px-3 h-7 sm:h-8 rounded-md text-xs font-medium transition ${activeTab === 'chart' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:text-white'}`}
                 >
                   Chart
                 </button>
                 <button
                   onClick={() => setActiveTab('data')}
-                  className={`px-3 h-8 rounded-md text-xs font-medium transition ${activeTab === 'data' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:text-white'}`}
+                  className={`px-2 sm:px-3 h-7 sm:h-8 rounded-md text-xs font-medium transition ${activeTab === 'data' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:text-white'}`}
                 >
                   Data
                 </button>
@@ -473,9 +474,9 @@ export default function App() {
               <button
                 onClick={downloadPdf}
                 title="Download PDF"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-700/70 text-slate-100 ring-1 ring-slate-600 hover:bg-slate-600 transition"
+                className="inline-flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-lg bg-slate-700/70 text-slate-100 ring-1 ring-slate-600 hover:bg-slate-600 transition flex-shrink-0"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="sm:w-4 sm:h-4">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="1.5" fill="none"/>
                   <path d="M14 2v6h6" stroke="currentColor" strokeWidth="1.5" fill="none"/>
                   <path d="M7.5 16h2a1.5 1.5 0 0 0 0-3h-2v3z" stroke="currentColor" strokeWidth="1.5" fill="none"/>
@@ -483,25 +484,25 @@ export default function App() {
                   <path d="M16 13h2m-2 3h2" stroke="currentColor" strokeWidth="1.5"/>
                 </svg>
               </button>
-              {/* Modern toggle to switch NOMINAL vs REAL (FR inflation) */}
+              {/* Modern toggle to switch NOMINAL vs REAL (FR inflation) - responsive width */}
               <button
                 onClick={() => setShowReal(v => !v)}
-                className={`relative inline-flex h-8 w-[220px] items-center rounded-full transition ${showReal ? 'bg-indigo-500/90' : 'bg-slate-700/70'}`}
+                className={`relative inline-flex h-7 sm:h-8 w-[100px] sm:w-[140px] items-center rounded-full transition flex-shrink-0 ${showReal ? 'bg-indigo-500/90' : 'bg-slate-700/70'}`}
                 title="Basculer NOMINAL / REAL (inflation FR)"
               >
                 <span
-                  className={`absolute left-1 top-1 h-6 w-6 rounded-full bg-white transition-transform ${showReal ? 'translate-x-[184px]' : 'translate-x-0'}`}
+                  className={`absolute left-0.5 sm:left-1 top-0.5 sm:top-1 h-6 w-6 rounded-full bg-white transition-transform ${showReal ? 'translate-x-[68px] sm:translate-x-[104px]' : 'translate-x-0'}`}
                 />
-                <span className="w-full text-center text-xs font-medium text-slate-100">
+                <span className="w-full text-center text-[10px] sm:text-xs font-medium text-slate-100">
                   {showReal ? 'REAL' : 'NOMINAL'}
                 </span>
               </button>
             </div>
           </div>
-          {!result && <div className="text-sm text-slate-400">Run a simulation to see results.</div>}
+          {!result && <div className="text-sm text-slate-400 flex-1 flex items-center justify-center">Run a simulation to see results.</div>}
           {result && activeTab === 'chart' && (
             <>
-              <div className="h-[calc(100%-3.5rem)]" ref={chartRef}>
+              <div className="flex-1 min-h-0" ref={chartRef}>
                 <ResponsiveContainer width="100%" height="100%">
                   {/* Dual-axis chart: left for values, right for yearly dividends bars */}
                   <ComposedChart data={chartData} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
@@ -664,7 +665,7 @@ export default function App() {
             </>
           )}
           {result && activeTab === 'data' && (
-            <div className="h-[calc(100%-3.5rem)] overflow-y-auto custom-scroll space-y-6">
+            <div className="flex-1 min-h-0 overflow-y-auto custom-scroll space-y-4 sm:space-y-6">
               {/* Global Summary Card */}
               {(() => {
                 const totalStart = result.portfolio[0]?.totalValue ?? 0
@@ -697,53 +698,47 @@ export default function App() {
                     <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                       <span className="text-2xl">📊</span> Résumé de votre investissement
                     </h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                      <div className="bg-slate-800/50 rounded-xl p-4">
-                        <div className="text-xs text-slate-400 mb-1">💰 Total investi</div>
-                        <div className="text-xl font-bold text-white">{fmtCur.format(totalContributed)}</div>
+                    <div className="grid grid-cols-2 gap-2 sm:gap-4 mb-4 sm:mb-6">
+                      <div className="bg-slate-800/50 rounded-xl p-2 sm:p-4">
+                        <div className="text-[10px] sm:text-xs text-slate-400 mb-1">💰 Total investi</div>
+                        <div className="text-sm sm:text-xl font-bold text-white">{fmtCur.format(totalContributed)}</div>
                       </div>
-                      <div className="bg-slate-800/50 rounded-xl p-4">
-                        <div className="text-xs text-slate-400 mb-1">🎯 Valeur finale</div>
-                        <div className="text-xl font-bold text-emerald-400">{fmtCur.format(totalEnd)}</div>
+                      <div className="bg-slate-800/50 rounded-xl p-2 sm:p-4">
+                        <div className="text-[10px] sm:text-xs text-slate-400 mb-1">🎯 Valeur finale</div>
+                        <div className="text-sm sm:text-xl font-bold text-emerald-400">{fmtCur.format(totalEnd)}</div>
                       </div>
-                      <div className="bg-slate-800/50 rounded-xl p-4">
-                        <div className="text-xs text-slate-400 mb-1">✨ Gains totaux</div>
-                        <div className={`text-xl font-bold ${totalGain >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      <div className="bg-slate-800/50 rounded-xl p-2 sm:p-4">
+                        <div className="text-[10px] sm:text-xs text-slate-400 mb-1">✨ Gains totaux</div>
+                        <div className={`text-sm sm:text-xl font-bold ${totalGain >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                           {totalGain >= 0 ? '+' : ''}{fmtCur.format(totalGain)}
                         </div>
-                        <div className={`text-sm ${totalGain >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
-                          soit +{(totalGainPct * 100).toFixed(1)}% sur le capital investi
+                        <div className={`text-[10px] sm:text-sm ${totalGain >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                          +{(totalGainPct * 100).toFixed(1)}%
                         </div>
                       </div>
-                      <div className="bg-slate-800/50 rounded-xl p-4">
-                        <div className="text-xs text-slate-400 mb-1">📈 Rendement du marché (ACGR)</div>
-                        <div className="text-xl font-bold text-amber-400">
+                      <div className="bg-slate-800/50 rounded-xl p-2 sm:p-4">
+                        <div className="text-[10px] sm:text-xs text-slate-400 mb-1">📈 ACGR</div>
+                        <div className="text-sm sm:text-xl font-bold text-amber-400">
                           +{(weightedAcgr * 100).toFixed(1)}%/an
                         </div>
-                        <div className="text-xs text-slate-500">moyenne historique sur 10 ans</div>
+                        <div className="text-[10px] text-slate-500 hidden sm:block">moy. 10 ans</div>
                       </div>
                     </div>
                     
-                    {/* Explanation box */}
-                    <div className="bg-slate-800/30 rounded-lg p-4 text-sm space-y-3">
+                    {/* Explanation box - hidden on very small screens for brevity */}
+                    <div className="bg-slate-800/30 rounded-lg p-2 sm:p-4 text-xs sm:text-sm space-y-2 sm:space-y-3">
                       <div className="text-slate-300">
-                        <span className="text-indigo-400 font-medium">💡 Intérêts composés :</span> Vos gains génèrent eux-mêmes des gains ! 
-                        C'est pour cela que votre investissement de <span className="text-white font-medium">{fmtCur.format(totalContributed)}</span> vaut maintenant <span className="text-emerald-400 font-medium">{fmtCur.format(totalEnd)}</span>.
+                        <span className="text-indigo-400 font-medium">💡 Intérêts composés :</span> Vos gains génèrent des gains !
                       </div>
                       
                       {hasDca && (
-                        <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-3 text-amber-200">
-                          <span className="font-medium">⚠️ Pourquoi mes gains ({(totalGainPct * 100).toFixed(1)}%) semblent plus bas que l'ACGR ({(weightedAcgr * 100).toFixed(1)}%/an) ?</span>
-                          <p className="mt-1 text-amber-100/80">
-                            Avec le <strong>DCA</strong> (investissement progressif), votre argent n'est pas investi pendant toute la durée :
+                        <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-2 sm:p-3 text-amber-200 text-[10px] sm:text-xs">
+                          <span className="font-medium">⚠️ Gains vs ACGR ?</span>
+                          <p className="mt-1 text-amber-100/80 hidden sm:block">
+                            Avec le DCA, votre argent n'est pas investi pendant toute la durée.
                           </p>
-                          <ul className="mt-2 text-xs space-y-1 text-amber-100/70">
-                            <li>• Votre 1er versement a profité de {years} ans de croissance</li>
-                            <li>• Votre dernier versement n'a eu que quelques mois</li>
-                            <li>• <strong>En moyenne</strong>, votre argent a été investi ~{avgInvestmentDuration.toFixed(1)} ans</li>
-                          </ul>
-                          <p className="mt-2 text-amber-100/80">
-                            → C'est <strong>normal</strong> ! Le marché a bien fait +{(weightedAcgr * 100).toFixed(1)}%/an, mais tout votre argent n'en a pas profité pendant {years} ans.
+                          <p className="mt-1 text-amber-100/80 sm:hidden">
+                            DCA = argent investi progressivement
                           </p>
                         </div>
                       )}
@@ -766,37 +761,37 @@ export default function App() {
                 const totalGainPctInstr = totalContributedInstr > 0 ? totalGainInstr / totalContributedInstr : 0
                 
                 return (
-                  <div key={s.isin} className="rounded-xl ring-1 ring-slate-700/50 bg-slate-900/60 p-5">
-                    {/* Header with summary */}
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <span className="inline-block h-4 w-4 rounded-full" style={{ backgroundColor: color }} />
-                        <div>
-                          <div className="text-base font-semibold text-slate-100">{s.name}</div>
-                          <div className="text-xs text-slate-400">{s.isin}</div>
+                  <div key={s.isin} className="rounded-xl ring-1 ring-slate-700/50 bg-slate-900/60 p-3 sm:p-5">
+                    {/* Header with summary - stacked on mobile */}
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-0 mb-3 sm:mb-4">
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        <span className="inline-block h-3 w-3 sm:h-4 sm:w-4 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                        <div className="min-w-0">
+                          <div className="text-sm sm:text-base font-semibold text-slate-100 truncate">{s.name}</div>
+                          <div className="text-[10px] sm:text-xs text-slate-400 truncate">{s.isin}</div>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <div className={`text-lg font-bold ${totalGainInstr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      <div className="text-left sm:text-right pl-5 sm:pl-0">
+                        <div className={`text-base sm:text-lg font-bold ${totalGainInstr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                           {totalGainInstr >= 0 ? '+' : ''}{fmtCur.format(totalGainInstr)}
                         </div>
-                        <div className={`text-sm ${totalGainPctInstr >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                        <div className={`text-xs sm:text-sm ${totalGainPctInstr >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
                           {totalGainPctInstr >= 0 ? '+' : ''}{(totalGainPctInstr * 100).toFixed(1)}% sur {years} ans
                         </div>
                       </div>
                     </div>
 
-                    {/* Info card about ACGR */}
-                    <div className="bg-slate-800/40 rounded-lg p-3 mb-4 text-sm">
-                      <span className="text-amber-400 font-medium">📊 Rendement historique moyen :</span>{' '}
+                    {/* Info card about ACGR - compact on mobile */}
+                    <div className="bg-slate-800/40 rounded-lg p-2 sm:p-3 mb-3 sm:mb-4 text-xs sm:text-sm">
+                      <span className="text-amber-400 font-medium">📊 ACGR :</span>{' '}
                       <span className="text-white font-bold">{acgr.toFixed(1)}%/an</span>
-                      <span className="text-slate-400 ml-2">
-                        (moyenne sur 10 ans — certaines années peuvent être négatives, mais sur la durée c'est positif)
+                      <span className="text-slate-400 ml-1 sm:ml-2 hidden sm:inline">
+                        (moy. 10 ans)
                       </span>
                     </div>
 
-                    {/* Yearly breakdown with months */}
-                    <div className="space-y-4">
+                    {/* Yearly breakdown with months - responsive */}
+                    <div className="space-y-3 sm:space-y-4">
                       {Array.from({ length: years }).map((_, yIdx) => {
                         const year = yIdx + 1
                         const startIdx = yIdx * 12
@@ -887,100 +882,95 @@ export default function App() {
                         
                         return (
                           <div key={year} className="rounded-lg ring-1 ring-slate-700/40 overflow-hidden">
-                            {/* Year header */}
-                            <div className={`px-4 py-3 ${yearMarketGain >= 0 ? 'bg-emerald-900/20' : 'bg-rose-900/20'}`}>
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                  <span className="text-lg font-bold text-white">Année {year}</span>
-                                  <span className="text-xs text-slate-400">
-                                    📈 {positiveMonths} mois en hausse • 📉 {negativeMonths} mois en baisse
-                                    {neutralMonths > 0 && ` • ➡️ ${neutralMonths} stables`}
+                            {/* Year header - responsive layout */}
+                            <div className={`px-2 sm:px-4 py-2 sm:py-3 ${yearMarketGain >= 0 ? 'bg-emerald-900/20' : 'bg-rose-900/20'}`}>
+                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-0">
+                                <div className="flex items-center gap-2 sm:gap-3">
+                                  <span className="text-base sm:text-lg font-bold text-white">Année {year}</span>
+                                  <span className="text-[10px] sm:text-xs text-slate-400 hidden sm:inline">
+                                    📈 {positiveMonths} ↑ • 📉 {negativeMonths} ↓
                                   </span>
                                 </div>
-                                <div className="text-right">
-                                  <div className={`font-bold ${yearMarketGain >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                    {yearMarketGain >= 0 ? '↗' : '↘'} {yearMarketGain >= 0 ? '+' : ''}{fmtCur.format(yearMarketGain)} cette année
+                                <div className="text-left sm:text-right">
+                                  <div className={`text-sm sm:text-base font-bold ${yearMarketGain >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {yearMarketGain >= 0 ? '+' : ''}{fmtCur.format(yearMarketGain)}
                                   </div>
-                                  <div className="text-xs text-slate-400">
-                                    + {fmtCur.format(yearDcaAdded)} investis • {yearGainPct >= 0 ? '+' : ''}{(yearGainPct * 100).toFixed(1)}% de rendement annuel
-                                  </div>
-                                  <div className="text-xs text-amber-400 mt-1">
-                                    📊 Gains cumulés fin d'année : {fmtCur.format(cumulativeGainsEndOfYear)}
+                                  <div className="text-[10px] sm:text-xs text-slate-400">
+                                    +{fmtCur.format(yearDcaAdded)} investis • {yearGainPct >= 0 ? '+' : ''}{(yearGainPct * 100).toFixed(1)}%
                                   </div>
                                 </div>
                               </div>
-                              {/* Calculation explanation */}
-                              <div className="mt-2 text-xs text-slate-500 border-t border-slate-700/50 pt-2 space-y-1">
+                              {/* Calculation explanation - hidden on mobile */}
+                              <div className="hidden sm:block mt-2 text-xs text-slate-500 border-t border-slate-700/50 pt-2 space-y-1">
                                 <div>
-                                  💡 <span className="text-slate-400">Calcul des gains de l'année :</span>{' '}
-                                  ({fmtCur.format(yearEndVal)} fin − {fmtCur.format(yearStartVal)} début) − {fmtCur.format(yearDcaAdded)} versés = <span className="text-white">{fmtCur.format(yearMarketGain)}</span>
+                                  💡 <span className="text-slate-400">Calcul :</span>{' '}
+                                  ({fmtCur.format(yearEndVal)} − {fmtCur.format(yearStartVal)}) − {fmtCur.format(yearDcaAdded)} = <span className="text-white">{fmtCur.format(yearMarketGain)}</span>
                                 </div>
                                 {yearDividends > 0 && (
                                   <div>
-                                    💜 <span className="text-purple-400">Dividendes réinvestis cette année : {fmtCur.format(yearDividends)}</span>
-                                    <span className="text-slate-500 ml-1">(inclus dans les gains, réinvestis automatiquement par le fonds)</span>
+                                    💜 <span className="text-purple-400">Dividendes : {fmtCur.format(yearDividends)}</span>
                                   </div>
                                 )}
                               </div>
                             </div>
                             
-                            {/* Monthly details */}
+                            {/* Monthly details - horizontal scroll on mobile */}
                             <div className="overflow-x-auto">
-                              <table className="min-w-full text-sm">
+                              <table className="min-w-[600px] sm:min-w-full text-[10px] sm:text-sm">
                                 <thead className="bg-slate-800/40 text-slate-400">
                                   <tr>
-                                    <th className="text-left px-3 py-2 text-xs">Mois</th>
-                                    <th className="text-right px-3 py-2 text-xs">💰 Valeur totale</th>
-                                    <th className="text-right px-3 py-2 text-xs">➕ Versement DCA</th>
-                                    <th className="text-right px-3 py-2 text-xs">📊 Variation</th>
-                                    <th className="text-right px-3 py-2 text-xs">📈 Rendement</th>
-                                    <th className="text-right px-3 py-2 text-xs">💵 Investi (cumulé)</th>
-                                    <th className="text-right px-3 py-2 text-xs">🎯 Gains (cumulés)</th>
-                                    <th className="text-right px-3 py-2 text-xs">📈 Rendement total</th>
+                                    <th className="text-left px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">Mois</th>
+                                    <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">Valeur</th>
+                                    <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">DCA</th>
+                                    <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">Var.</th>
+                                    <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">%</th>
+                                    <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">Investi</th>
+                                    <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">Gains</th>
+                                    <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">Rend.</th>
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {monthlyData.map((m, mIdx) => {
-                                    const monthNames = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc']
+                                    const monthNames = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
                                     const globalMonthIdx = startIdx + mIdx
                                     return (
                                       <tr key={m.month} className={mIdx % 2 === 0 ? 'bg-slate-900/30' : 'bg-slate-900/10'}>
-                                        <td className="px-3 py-2 text-slate-200 font-medium">
+                                        <td className="px-1.5 sm:px-3 py-1 sm:py-2 text-slate-200 font-medium whitespace-nowrap">
                                           {monthNames[m.month - 1]}
                                         </td>
-                                        <td className="px-3 py-2 text-right text-white font-bold">
+                                        <td className="px-1.5 sm:px-3 py-1 sm:py-2 text-right text-white font-bold whitespace-nowrap">
                                           {fmtCur.format(m.value)}
                                         </td>
-                                        <td className="px-3 py-2 text-right">
+                                        <td className="px-1.5 sm:px-3 py-1 sm:py-2 text-right whitespace-nowrap">
                                           {m.dcaAdded > 0 ? (
                                             <span className="text-blue-400">+{fmtCur.format(m.dcaAdded)}</span>
                                           ) : (
                                             <span className="text-slate-500">—</span>
                                           )}
                                         </td>
-                                        <td className={`px-3 py-2 text-right font-medium ${m.interestEarned >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                        <td className={`px-1.5 sm:px-3 py-1 sm:py-2 text-right font-medium whitespace-nowrap ${m.interestEarned >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                           {globalMonthIdx === 0 ? (
                                             <span className="text-slate-500">—</span>
                                           ) : (
                                             <span>{m.interestEarned >= 0 ? '+' : ''}{fmtCur.format(m.interestEarned)}</span>
                                           )}
                                         </td>
-                                        <td className={`px-3 py-2 text-right ${m.interestPct >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                                        <td className={`px-1.5 sm:px-3 py-1 sm:py-2 text-right whitespace-nowrap ${m.interestPct >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
                                           {globalMonthIdx === 0 ? (
                                             <span className="text-slate-500">—</span>
                                           ) : (
-                                            <span>{m.interestPct >= 0 ? '+' : ''}{(m.interestPct * 100).toFixed(2)}%</span>
+                                            <span>{m.interestPct >= 0 ? '+' : ''}{(m.interestPct * 100).toFixed(1)}%</span>
                                           )}
                                         </td>
-                                        <td className="px-3 py-2 text-right text-slate-300">
+                                        <td className="px-1.5 sm:px-3 py-1 sm:py-2 text-right text-slate-300 whitespace-nowrap">
                                           {fmtCur.format(m.totalInvested)}
                                         </td>
-                                        <td className={`px-3 py-2 text-right font-medium ${m.totalInterestEarned >= 0 ? 'text-amber-400' : 'text-rose-400'}`}>
+                                        <td className={`px-1.5 sm:px-3 py-1 sm:py-2 text-right font-medium whitespace-nowrap ${m.totalInterestEarned >= 0 ? 'text-amber-400' : 'text-rose-400'}`}>
                                           {m.totalInterestEarned >= 0 ? '+' : ''}{fmtCur.format(m.totalInterestEarned)}
                                         </td>
-                                        <td className="px-3 py-2 text-right">
+                                        <td className="px-1.5 sm:px-3 py-1 sm:py-2 text-right whitespace-nowrap">
                                           <span className={`font-bold ${m.totalReturnPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                            {m.totalReturnPct >= 0 ? '+' : ''}{(m.totalReturnPct * 100).toFixed(2)}%
+                                            {m.totalReturnPct >= 0 ? '+' : ''}{(m.totalReturnPct * 100).toFixed(1)}%
                                           </span>
                                         </td>
                                       </tr>
@@ -990,34 +980,27 @@ export default function App() {
                               </table>
                             </div>
                             
-                            {/* Year summary explanation */}
-                            <div className="px-4 py-3 bg-slate-800/30 text-xs text-slate-400 space-y-2">
+                            {/* Year summary explanation - hidden on mobile */}
+                            <div className="hidden sm:block px-4 py-3 bg-slate-800/30 text-xs text-slate-400 space-y-2">
                               <div className="flex items-start gap-2">
                                 <span className="text-lg">💡</span>
                                 <div>
                                   <span className="text-slate-300 font-medium">Comment lire ce tableau :</span>
                                   <ul className="mt-1 space-y-1 text-slate-400">
-                                    <li>• <span className="text-blue-400">Versement DCA</span> = l'argent que VOUS ajoutez ce mois</li>
-                                    <li>• <span className="text-emerald-400">Variation</span> = hausse/baisse du marché ce mois (≈{monthlyRate.toFixed(2)}%/mois en moyenne)</li>
-                                    <li>• <span className="text-amber-400">Gains (cumulés)</span> = tous vos gains depuis le début (pas juste cette année !)</li>
+                                    <li>• <span className="text-blue-400">DCA</span> = l'argent que VOUS ajoutez</li>
+                                    <li>• <span className="text-emerald-400">Var.</span> = hausse/baisse du marché</li>
+                                    <li>• <span className="text-amber-400">Gains</span> = gains cumulés depuis le début</li>
                                   </ul>
-                                  <div className="mt-2 text-xs text-slate-500 border-l-2 border-slate-600 pl-2">
-                                    ⚠️ Ne confondez pas : l'en-tête montre les <span className="text-white">gains de l'année</span>, 
-                                    la colonne montre les <span className="text-amber-400">gains cumulés</span> depuis le début.
-                                  </div>
                                 </div>
                               </div>
                               <div className="border-t border-slate-700/50 pt-2">
                                 {yearMarketGain >= 0 ? (
                                   <span>
-                                    ✅ <span className="text-emerald-400">Bonne année !</span> Le marché vous a rapporté <span className="text-white font-medium">{fmtCur.format(yearMarketGain)}</span> de gains 
-                                    ({(yearGainPct * 100).toFixed(2)}% de rendement sur votre capital).
-                                    {negativeMonths > 0 && <span className="text-slate-500"> Malgré {negativeMonths} mois de baisse, le bilan annuel reste positif.</span>}
+                                    ✅ <span className="text-emerald-400">Bonne année !</span> +{fmtCur.format(yearMarketGain)} ({(yearGainPct * 100).toFixed(1)}%)
                                   </span>
                                 ) : (
                                   <span>
-                                    ⚠️ <span className="text-rose-400">Année difficile.</span> Le marché a fait perdre <span className="text-white font-medium">{fmtCur.format(Math.abs(yearMarketGain))}</span> à votre portefeuille.
-                                    <span className="text-amber-400"> C'est normal ! Les marchés fluctuent, mais sur le long terme ({acgr.toFixed(1)}%/an en moyenne), la tendance est positive.</span>
+                                    ⚠️ <span className="text-rose-400">Année difficile.</span> -{fmtCur.format(Math.abs(yearMarketGain))}
                                   </span>
                                 )}
                               </div>
@@ -1027,19 +1010,15 @@ export default function App() {
                       })}
                     </div>
 
-                    {/* Final compound interest explanation */}
-                    <div className="mt-4 bg-gradient-to-r from-indigo-900/30 to-purple-900/30 rounded-lg p-4 text-sm">
-                      <div className="font-medium text-indigo-300 mb-2">🧮 Comment fonctionnent les intérêts composés ?</div>
+                    {/* Final compound interest explanation - simplified on mobile */}
+                    <div className="mt-3 sm:mt-4 bg-gradient-to-r from-indigo-900/30 to-purple-900/30 rounded-lg p-2 sm:p-4 text-xs sm:text-sm">
+                      <div className="font-medium text-indigo-300 mb-1 sm:mb-2">🧮 Intérêts composés</div>
                       <div className="text-slate-300 space-y-1">
-                        <p>• <span className="text-white">Mois 1</span> : Votre capital de départ génère des intérêts</p>
-                        <p>• <span className="text-white">Mois 2</span> : Ces intérêts sont ajoutés à votre capital → le nouveau total génère plus d'intérêts</p>
-                        <p>• <span className="text-white">Et ainsi de suite...</span> Chaque mois, vous gagnez des intérêts sur vos intérêts précédents !</p>
-                        <p className="mt-2 text-indigo-200">
-                          📌 Résultat : <span className="font-bold">{fmtCur.format(totalContributedInstr)}</span> investi → <span className="font-bold text-emerald-400">{fmtCur.format(endVal)}</span> final
-                          {' '}({totalGainInstr >= 0 ? '+' : ''}{fmtCur.format(totalGainInstr)} de gains, soit {totalGainPctInstr >= 0 ? '+' : ''}{(totalGainPctInstr * 100).toFixed(1)}%)
-                        </p>
-                        <p className="text-xs text-slate-400 mt-1">
-                          Rendement du marché (ACGR) : <span className="text-amber-400 font-medium">+{acgr.toFixed(1)}%/an</span> en moyenne sur 10 ans
+                        <p className="hidden sm:block">• <span className="text-white">Mois 1</span> : Votre capital génère des intérêts</p>
+                        <p className="hidden sm:block">• <span className="text-white">Mois 2</span> : Les intérêts sont ajoutés → plus d'intérêts</p>
+                        <p className="text-indigo-200">
+                          📌 <span className="font-bold">{fmtCur.format(totalContributedInstr)}</span> → <span className="font-bold text-emerald-400">{fmtCur.format(endVal)}</span>
+                          {' '}({totalGainPctInstr >= 0 ? '+' : ''}{(totalGainPctInstr * 100).toFixed(1)}%)
                         </p>
                       </div>
                     </div>

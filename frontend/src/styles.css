@@ -19,4 +19,21 @@ body { @apply bg-slate-950 text-slate-100; }
 .custom-scroll:hover::-webkit-scrollbar-thumb { background-color: rgba(148,163,184,0.35); }
 .custom-scroll::-webkit-scrollbar-corner { background: transparent; }
 
+/* Mobile-friendly horizontal scroll for tables */
+@media (max-width: 640px) {
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* Make sure Recharts charts are visible on mobile */
+  .recharts-wrapper {
+    max-width: 100%;
+  }
+}
+
+/* Ensure responsive container works properly */
+.recharts-responsive-container {
+  min-height: 250px;
+}
+
 
