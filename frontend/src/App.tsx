@@ -158,10 +158,13 @@ export default function App() {
   // Prepare chart data and compute yearly dividend sums at month boundaries (12, 24, ...)
   const chartData = useMemo(() => {
     if (!result) return [] as ChartRow[]
+    // Capital initial = valeur du panier AVANT simulation
+    const capitalInitialForChart = basketMarketValue
     const base: ChartRow[] = result.portfolio.map(p => ({
       month: p.monthIndex,
       total: p.totalValue,
-      contributed: p.contributed,
+      // Contributed = capital initial + tous les DCA jusqu'à ce mois
+      contributed: capitalInitialForChart + p.contributed,
       dividends: p.dividendsPaid,
       monthlyDivs: p.monthlyDividendsGenerated,
       // also include each instrument series so stacking still works
@@ -196,7 +199,7 @@ export default function App() {
       if (base[end]) base[end].yearlyDivs = sum
     }
     return base
-  }, [result, sideCapital, showReal])
+  }, [result, sideCapital, showReal, basketMarketValue])
 
   // Currency formatter for axes/tooltip labels (compact, modern)
   const fmt = useMemo(() => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }), [])
@@ -668,30 +671,31 @@ export default function App() {
             <div className="flex-1 min-h-0 overflow-y-auto custom-scroll space-y-4 sm:space-y-6">
               {/* Global Summary Card */}
               {(() => {
-                const totalStart = result.portfolio[0]?.totalValue ?? 0
-                const totalEnd = result.portfolio[result.portfolio.length - 1]?.totalValue ?? 0
-                const totalContributed = result.portfolio[result.portfolio.length - 1]?.contributed ?? 0
+                // Use the SAME index as the last month displayed in the yearly tables
+                const lastMonthIdx = Math.min(years * 12 - 1, result.portfolio.length - 1)
+                const totalEnd = result.portfolio[lastMonthIdx]?.totalValue ?? 0
+                // Capital initial = valeur du panier
+                const capitalInitial = basketMarketValue
+                // Total DCA from the SAME index for consistency
+                const totalDcaContributed = result.portfolio[lastMonthIdx]?.contributed ?? 0
+                // Total investi = capital initial + tous les DCA
+                const totalContributed = capitalInitial + totalDcaContributed
                 const totalGain = totalEnd - totalContributed
                 const totalGainPct = totalContributed > 0 ? totalGain / totalContributed : 0
                 
                 // Calculate weighted average ACGR from result instruments
                 const weightedAcgr = (() => {
                   if (!result.instruments || result.instruments.length === 0) return 0
-                  // Use instruments from result and find their ACGR from the instruments list
                   const acgrs = result.instruments.map(s => {
                     const ins = instruments.find(i => i.isin === s.isin)
                     return ins?.acgr10 ?? ins?.totalAnnualReturnRate ?? 0
                   })
-                  // Simple average if we can't get weights
                   if (acgrs.length === 0) return 0
                   return acgrs.reduce((sum, a) => sum + a, 0) / acgrs.length
                 })()
                 
-                // Average investment duration with DCA (in years)
-                // First euro invested for full period, last euro for 0 time
-                // Average = years / 2 approximately
-                const avgInvestmentDuration = years / 2
                 const hasDca = dca && dca.amountPerPeriod > 0
+                const dcaPerYear = hasDca ? (dca.amountPerPeriod * (dca.frequency === 'MONTHLY' ? 12 : dca.frequency === 'QUARTERLY' ? 4 : 1)) : 0
                 
                 return (
                   <div className="rounded-2xl bg-gradient-to-br from-indigo-900/40 to-slate-900/60 ring-1 ring-indigo-500/30 p-6">
@@ -702,6 +706,9 @@ export default function App() {
                       <div className="bg-slate-800/50 rounded-xl p-2 sm:p-4">
                         <div className="text-[10px] sm:text-xs text-slate-400 mb-1">💰 Total investi</div>
                         <div className="text-sm sm:text-xl font-bold text-white">{fmtCur.format(totalContributed)}</div>
+                        <div className="text-[10px] text-slate-500 mt-1">
+                          {fmtCur.format(capitalInitial)} initial {hasDca && `+ ${fmtCur.format(totalDcaContributed)} DCA`}
+                        </div>
                       </div>
                       <div className="bg-slate-800/50 rounded-xl p-2 sm:p-4">
                         <div className="text-[10px] sm:text-xs text-slate-400 mb-1">🎯 Valeur finale</div>
@@ -713,7 +720,7 @@ export default function App() {
                           {totalGain >= 0 ? '+' : ''}{fmtCur.format(totalGain)}
                         </div>
                         <div className={`text-[10px] sm:text-sm ${totalGain >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
-                          +{(totalGainPct * 100).toFixed(1)}%
+                          {totalGainPct >= 0 ? '+' : ''}{(totalGainPct * 100).toFixed(1)}%
                         </div>
                       </div>
                       <div className="bg-slate-800/50 rounded-xl p-2 sm:p-4">
@@ -735,7 +742,7 @@ export default function App() {
                         <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-2 sm:p-3 text-amber-200 text-[10px] sm:text-xs">
                           <span className="font-medium">⚠️ Gains vs ACGR ?</span>
                           <p className="mt-1 text-amber-100/80 hidden sm:block">
-                            Avec le DCA, votre argent n'est pas investi pendant toute la durée.
+                            Avec le DCA, votre argent n'est pas investi pendant toute la durée. Rendement réel ≠ ACGR.
                           </p>
                           <p className="mt-1 text-amber-100/80 sm:hidden">
                             DCA = argent investi progressivement
@@ -752,11 +759,20 @@ export default function App() {
                 const color = palette[idx % palette.length]
                 const ins = instruments.find(i => i.isin === s.isin)
                 const acgr = (ins?.acgr10 ?? ins?.totalAnnualReturnRate ?? 0) * 100
-                const start0 = s.points[0]?.value ?? 0
-                const endVal = s.points[s.points.length - 1]?.value ?? 0
                 
-                // Get total contributed for this instrument to calculate real gains
-                const totalContributedInstr = result.portfolio[result.portfolio.length - 1]?.contributed ?? 0
+                // Use the SAME index as the last month displayed in the yearly tables
+                // lastMonthIdx = December of the last year = years * 12 - 1
+                const lastMonthIdx = Math.min(years * 12 - 1, s.points.length - 1)
+                const endVal = s.points[lastMonthIdx]?.value ?? 0
+                
+                // Capital initial = valeur du panier (basketMarketValue)
+                const capitalInitialInstr = basketMarketValue
+                
+                // Total DCA from the SAME index as endVal for consistency
+                const totalDcaInstr = result.portfolio[lastMonthIdx]?.contributed ?? 0
+                
+                // Total investi = capital initial + tous les DCA
+                const totalContributedInstr = capitalInitialInstr + totalDcaInstr
                 const totalGainInstr = endVal - totalContributedInstr
                 const totalGainPctInstr = totalContributedInstr > 0 ? totalGainInstr / totalContributedInstr : 0
                 
@@ -795,14 +811,19 @@ export default function App() {
                       {Array.from({ length: years }).map((_, yIdx) => {
                         const year = yIdx + 1
                         const startIdx = yIdx * 12
-                        const endIdx = Math.min(year * 12, s.points.length - 1)
-                        const yearStartVal = s.points[startIdx]?.value ?? 0
+                        // endIdx = December of this year (month 11 for year 1, month 23 for year 2, etc.)
+                        const endIdx = Math.min(year * 12 - 1, s.points.length - 1)
+                        // prevYearEndIdx = December of previous year (or -1 for year 1)
+                        const prevYearEndIdx = year === 1 ? -1 : (year - 1) * 12 - 1
+                        
+                        // Value at start of year = end of previous year (or capital initial for year 1)
+                        const yearStartVal = year === 1 ? capitalInitialInstr : (s.points[prevYearEndIdx]?.value ?? 0)
                         const yearEndVal = s.points[endIdx]?.value ?? 0
                         
-                        // Get contributed amounts from portfolio data
-                        const yearStartContrib = result.portfolio[startIdx]?.contributed ?? 0
+                        // DCA added this year = contributions at end of year - contributions at end of previous year
+                        const prevYearContrib = year === 1 ? 0 : (result.portfolio[prevYearEndIdx]?.contributed ?? 0)
                         const yearEndContrib = result.portfolio[endIdx]?.contributed ?? 0
-                        const yearDcaAdded = yearEndContrib - yearStartContrib
+                        const yearDcaAdded = yearEndContrib - prevYearContrib
                         
                         // Pure gain = value change - new contributions (this is the "variation" due to market)
                         const yearMarketGain = (yearEndVal - yearStartVal) - yearDcaAdded
@@ -815,21 +836,24 @@ export default function App() {
                           yearDividends += result.portfolio[mIdx]?.monthlyDividendsGenerated ?? 0
                         }
                         
-                        // Calculate year return % based on average capital during the year
-                        // More accurate than just using start value (which could be 0 with DCA)
-                        const avgCapitalDuringYear = (yearStartVal + yearEndVal) / 2
-                        const yearGainPct = avgCapitalDuringYear > 0 ? yearMarketGain / avgCapitalDuringYear : 0
+                        // Calculate year return % based on AVERAGE capital invested during the year
+                        // DCA is added progressively, so on average it's invested half the year
+                        // This gives a % comparable to CAGR
+                        const avgCapitalInvested = yearStartVal + (yearDcaAdded / 2)
+                        const yearGainPct = avgCapitalInvested > 0 ? yearMarketGain / avgCapitalInvested : 0
                         
-                        // Get monthly data for this year (starting from month 1, not 0)
+                        // Get monthly data for this year
                         const monthlyData = []
                         for (let m = 0; m < 12; m++) {
                           const mIdx = startIdx + m
                           if (mIdx >= s.points.length) break
                           
-                          // For month calculations, compare with previous month
+                          // For first month ever (global mIdx === 0), start value is capital initial
+                          // For other months, start value is end of previous month
+                          const isFirstMonth = mIdx === 0
                           const prevIdx = mIdx > 0 ? mIdx - 1 : 0
-                          const prevVal = mIdx > 0 ? (s.points[prevIdx]?.value ?? 0) : 0
-                          const curVal = s.points[mIdx]?.value ?? 0
+                          const valueStart = isFirstMonth ? capitalInitialInstr : (s.points[prevIdx]?.value ?? 0)
+                          const valueEnd = s.points[mIdx]?.value ?? 0
                           
                           // Get contributions to calculate DCA vs interest
                           const prevContrib = mIdx > 0 ? (result.portfolio[prevIdx]?.contributed ?? 0) : 0
@@ -837,22 +861,21 @@ export default function App() {
                           const dcaThisMonth = curContrib - prevContrib
                           
                           // Interest = total change - DCA contribution
-                          // For first data point (month 0), the value IS the DCA, so interest is 0
-                          const totalChange = curVal - prevVal
-                          const interestEarned = mIdx === 0 ? 0 : totalChange - dcaThisMonth
+                          const totalChange = valueEnd - valueStart
+                          const interestEarned = totalChange - dcaThisMonth
                           
-                          // Interest % relative to the capital at start of month
-                          const capitalAtStartOfMonth = prevVal > 0 ? prevVal : (curContrib - dcaThisMonth)
-                          const interestPct = capitalAtStartOfMonth > 0 ? interestEarned / capitalAtStartOfMonth : 0
+                          // Interest % relative to the capital at start of month (before DCA)
+                          const interestPct = valueStart > 0 ? interestEarned / valueStart : 0
                           
-                          // Cumulative: total interest earned since start
-                          const totalInvested = curContrib
-                          const totalInterestEarned = curVal - totalInvested
+                          // Cumulative: total invested = capital initial + all DCA so far
+                          const totalInvested = capitalInitialInstr + curContrib
+                          const totalInterestEarned = valueEnd - totalInvested
                           const totalReturnPct = totalInvested > 0 ? totalInterestEarned / totalInvested : 0
                           
                           monthlyData.push({
                             month: m + 1,
-                            value: curVal,
+                            valueStart: valueStart,       // Value at START of month (before DCA and variation)
+                            valueEnd: valueEnd,           // Value at END of month (after DCA and variation)
                             dcaAdded: dcaThisMonth,
                             interestEarned: interestEarned,
                             interestPct: interestPct,
@@ -862,14 +885,10 @@ export default function App() {
                           })
                         }
                         
-                        // Count positive/negative months
-                        // Only skip the very first month (global index 0) which has no interest yet
-                        // For year 2, 3, 4 etc., all 12 months have interest data
-                        const isFirstYear = year === 1
-                        const monthsWithData = isFirstYear ? monthlyData.slice(1) : monthlyData
-                        const positiveMonths = monthsWithData.filter(m => m.interestEarned > 0.01).length
-                        const negativeMonths = monthsWithData.filter(m => m.interestEarned < -0.01).length
-                        const neutralMonths = monthsWithData.filter(m => Math.abs(m.interestEarned) <= 0.01).length
+                        // Count positive/negative months (all months now have valid data)
+                        const positiveMonths = monthlyData.filter(m => m.interestEarned > 0.01).length
+                        const negativeMonths = monthlyData.filter(m => m.interestEarned < -0.01).length
+                        const neutralMonths = monthlyData.filter(m => Math.abs(m.interestEarned) <= 0.01).length
                         
                         // Monthly rate for explanation
                         const monthlyRate = acgr / 12
@@ -903,8 +922,13 @@ export default function App() {
                               {/* Calculation explanation - hidden on mobile */}
                               <div className="hidden sm:block mt-2 text-xs text-slate-500 border-t border-slate-700/50 pt-2 space-y-1">
                                 <div>
-                                  💡 <span className="text-slate-400">Calcul :</span>{' '}
-                                  ({fmtCur.format(yearEndVal)} − {fmtCur.format(yearStartVal)}) − {fmtCur.format(yearDcaAdded)} = <span className="text-white">{fmtCur.format(yearMarketGain)}</span>
+                                  💡 <span className="text-slate-400">Gain : (Fin Déc − Début Jan) − DCA</span>
+                                </div>
+                                <div className="text-slate-300">
+                                  ({fmtCur.format(yearEndVal)} − {fmtCur.format(yearStartVal)}) − {fmtCur.format(yearDcaAdded)} = <span className="text-white font-medium">{fmtCur.format(yearMarketGain)}</span>
+                                </div>
+                                <div className="text-slate-400">
+                                  Rendement : {fmtCur.format(yearMarketGain)} / {fmtCur.format(avgCapitalInvested)} (capital moy.) = <span className="text-amber-400">{(yearGainPct * 100).toFixed(1)}%</span>
                                 </div>
                                 {yearDividends > 0 && (
                                   <div>
@@ -916,14 +940,14 @@ export default function App() {
                             
                             {/* Monthly details - horizontal scroll on mobile */}
                             <div className="overflow-x-auto">
-                              <table className="min-w-[600px] sm:min-w-full text-[10px] sm:text-sm">
+                              <table className="min-w-[700px] sm:min-w-full text-[10px] sm:text-sm">
                                 <thead className="bg-slate-800/40 text-slate-400">
                                   <tr>
                                     <th className="text-left px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">Mois</th>
-                                    <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">Valeur</th>
+                                    <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap bg-slate-700/30">Début</th>
                                     <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">DCA</th>
                                     <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">Var.</th>
-                                    <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">%</th>
+                                    <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap bg-slate-700/30">Fin</th>
                                     <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">Investi</th>
                                     <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">Gains</th>
                                     <th className="text-right px-1.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-xs whitespace-nowrap">Rend.</th>
@@ -932,14 +956,13 @@ export default function App() {
                                 <tbody>
                                   {monthlyData.map((m, mIdx) => {
                                     const monthNames = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
-                                    const globalMonthIdx = startIdx + mIdx
                                     return (
                                       <tr key={m.month} className={mIdx % 2 === 0 ? 'bg-slate-900/30' : 'bg-slate-900/10'}>
                                         <td className="px-1.5 sm:px-3 py-1 sm:py-2 text-slate-200 font-medium whitespace-nowrap">
                                           {monthNames[m.month - 1]}
                                         </td>
-                                        <td className="px-1.5 sm:px-3 py-1 sm:py-2 text-right text-white font-bold whitespace-nowrap">
-                                          {fmtCur.format(m.value)}
+                                        <td className="px-1.5 sm:px-3 py-1 sm:py-2 text-right text-slate-300 whitespace-nowrap bg-slate-800/20">
+                                          {fmtCur.format(m.valueStart)}
                                         </td>
                                         <td className="px-1.5 sm:px-3 py-1 sm:py-2 text-right whitespace-nowrap">
                                           {m.dcaAdded > 0 ? (
@@ -949,18 +972,10 @@ export default function App() {
                                           )}
                                         </td>
                                         <td className={`px-1.5 sm:px-3 py-1 sm:py-2 text-right font-medium whitespace-nowrap ${m.interestEarned >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                          {globalMonthIdx === 0 ? (
-                                            <span className="text-slate-500">—</span>
-                                          ) : (
-                                            <span>{m.interestEarned >= 0 ? '+' : ''}{fmtCur.format(m.interestEarned)}</span>
-                                          )}
+                                          {m.interestEarned >= 0 ? '+' : ''}{fmtCur.format(m.interestEarned)}
                                         </td>
-                                        <td className={`px-1.5 sm:px-3 py-1 sm:py-2 text-right whitespace-nowrap ${m.interestPct >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
-                                          {globalMonthIdx === 0 ? (
-                                            <span className="text-slate-500">—</span>
-                                          ) : (
-                                            <span>{m.interestPct >= 0 ? '+' : ''}{(m.interestPct * 100).toFixed(1)}%</span>
-                                          )}
+                                        <td className="px-1.5 sm:px-3 py-1 sm:py-2 text-right text-white font-bold whitespace-nowrap bg-slate-800/20">
+                                          {fmtCur.format(m.valueEnd)}
                                         </td>
                                         <td className="px-1.5 sm:px-3 py-1 sm:py-2 text-right text-slate-300 whitespace-nowrap">
                                           {fmtCur.format(m.totalInvested)}
@@ -987,8 +1002,10 @@ export default function App() {
                                 <div>
                                   <span className="text-slate-300 font-medium">Comment lire ce tableau :</span>
                                   <ul className="mt-1 space-y-1 text-slate-400">
+                                    <li>• <span className="text-slate-300">Début</span> = valeur avant DCA et variation du mois</li>
                                     <li>• <span className="text-blue-400">DCA</span> = l'argent que VOUS ajoutez</li>
                                     <li>• <span className="text-emerald-400">Var.</span> = hausse/baisse du marché</li>
+                                    <li>• <span className="text-white font-medium">Fin</span> = Début + DCA + Var.</li>
                                     <li>• <span className="text-amber-400">Gains</span> = gains cumulés depuis le début</li>
                                   </ul>
                                 </div>
@@ -1039,8 +1056,12 @@ export default function App() {
 
               {/* Global Summary */}
               {(() => {
-                const totalEnd = result.portfolio[result.portfolio.length - 1]?.totalValue ?? 0
-                const totalContributed = result.portfolio[result.portfolio.length - 1]?.contributed ?? 0
+                // Use the SAME index as the last month displayed in the yearly tables
+                const lastMonthIdx = Math.min(years * 12 - 1, result.portfolio.length - 1)
+                const totalEnd = result.portfolio[lastMonthIdx]?.totalValue ?? 0
+                const capitalInitialPdf = basketMarketValue
+                const totalDcaPdf = result.portfolio[lastMonthIdx]?.contributed ?? 0
+                const totalContributed = capitalInitialPdf + totalDcaPdf
                 const totalGain = totalEnd - totalContributed
                 const totalGainPct = totalContributed > 0 ? totalGain / totalContributed : 0
                 const weightedAcgr = (() => {
@@ -1119,7 +1140,10 @@ export default function App() {
               {result.instruments.map((s) => {
                 const ins = instruments.find(i => i.isin === s.isin)
                 const acgr = (ins?.acgr10 ?? ins?.totalAnnualReturnRate ?? 0) * 100
-                const totalContributedInstr = result.portfolio[result.portfolio.length - 1]?.contributed ?? 0
+                // Capital initial = valeur du panier AVANT simulation
+                const capitalInitialInstrPdf = basketMarketValue
+                const totalDcaInstrPdf = result.portfolio[result.portfolio.length - 1]?.contributed ?? 0
+                const totalContributedInstr = capitalInitialInstrPdf + totalDcaInstrPdf
                 const endVal = s.points[s.points.length - 1]?.value ?? 0
                 const totalGainInstr = endVal - totalContributedInstr
                 const totalGainPctInstr = totalContributedInstr > 0 ? totalGainInstr / totalContributedInstr : 0
@@ -1151,42 +1175,52 @@ export default function App() {
                     {Array.from({ length: years }).map((_, yIdx) => {
                       const year = yIdx + 1
                       const startIdx = yIdx * 12
-                      const endIdx = Math.min(year * 12, s.points.length - 1)
-                      const yearStartVal = s.points[startIdx]?.value ?? 0
+                      // endIdx = December of this year
+                      const endIdx = Math.min(year * 12 - 1, s.points.length - 1)
+                      // prevYearEndIdx = December of previous year (or -1 for year 1)
+                      const prevYearEndIdx = year === 1 ? -1 : (year - 1) * 12 - 1
+                      
+                      // Value at start of year = end of previous year (or capital initial for year 1)
+                      const yearStartVal = year === 1 ? capitalInitialInstrPdf : (s.points[prevYearEndIdx]?.value ?? 0)
                       const yearEndVal = s.points[endIdx]?.value ?? 0
-                      const yearStartContrib = result.portfolio[startIdx]?.contributed ?? 0
+                      
+                      // DCA added this year
+                      const prevYearContrib = year === 1 ? 0 : (result.portfolio[prevYearEndIdx]?.contributed ?? 0)
                       const yearEndContrib = result.portfolio[endIdx]?.contributed ?? 0
-                      const yearDcaAdded = yearEndContrib - yearStartContrib
+                      const yearDcaAdded = yearEndContrib - prevYearContrib
                       const yearMarketGain = (yearEndVal - yearStartVal) - yearDcaAdded
-                      const avgCapitalDuringYear = (yearStartVal + yearEndVal) / 2
-                      const yearGainPct = avgCapitalDuringYear > 0 ? yearMarketGain / avgCapitalDuringYear : 0
+                      // Use AVERAGE capital invested (DCA is added progressively)
+                      const avgCapitalInvestedPdf = yearStartVal + (yearDcaAdded / 2)
+                      const yearGainPct = avgCapitalInvestedPdf > 0 ? yearMarketGain / avgCapitalInvestedPdf : 0
 
                       // Monthly data
-                      const monthlyData: Array<{month: number, value: number, dcaAdded: number, variation: number, variationPct: number, totalInvested: number, totalInterestEarned: number, totalReturnPct: number}> = []
+                      const monthlyData: Array<{month: number, valueStart: number, valueEnd: number, dcaAdded: number, variation: number, variationPct: number, totalInvested: number, totalInterestEarned: number, totalReturnPct: number}> = []
                       for (let m = 0; m < 12; m++) {
                         const mIdx = startIdx + m
                         if (mIdx >= s.points.length) break
+                        
+                        // For first month ever, start value is capital initial
+                        const isFirstMonth = mIdx === 0
                         const prevIdx = mIdx > 0 ? mIdx - 1 : 0
-                        const prevVal = mIdx > 0 ? (s.points[prevIdx]?.value ?? 0) : 0
-                        const curVal = s.points[mIdx]?.value ?? 0
+                        const valueStart = isFirstMonth ? capitalInitialInstrPdf : (s.points[prevIdx]?.value ?? 0)
+                        const valueEnd = s.points[mIdx]?.value ?? 0
+                        
                         const prevContrib = mIdx > 0 ? (result.portfolio[prevIdx]?.contributed ?? 0) : 0
                         const curContrib = result.portfolio[mIdx]?.contributed ?? 0
                         const dcaThisMonth = curContrib - prevContrib
-                        const totalChange = curVal - prevVal
-                        const variation = mIdx === 0 ? 0 : totalChange - dcaThisMonth
-                        const capitalAtStartOfMonth = prevVal > 0 ? prevVal : (curContrib - dcaThisMonth)
-                        const variationPct = capitalAtStartOfMonth > 0 ? variation / capitalAtStartOfMonth : 0
-                        const totalInvested = curContrib
-                        const totalInterestEarned = curVal - totalInvested
+                        const totalChange = valueEnd - valueStart
+                        const variation = totalChange - dcaThisMonth
+                        const variationPct = valueStart > 0 ? variation / valueStart : 0
+                        
+                        const totalInvested = capitalInitialInstrPdf + curContrib
+                        const totalInterestEarned = valueEnd - totalInvested
                         const totalReturnPct = totalInvested > 0 ? totalInterestEarned / totalInvested : 0
 
-                        monthlyData.push({ month: m + 1, value: curVal, dcaAdded: dcaThisMonth, variation, variationPct, totalInvested, totalInterestEarned, totalReturnPct })
+                        monthlyData.push({ month: m + 1, valueStart, valueEnd, dcaAdded: dcaThisMonth, variation, variationPct, totalInvested, totalInterestEarned, totalReturnPct })
                       }
 
-                      const isFirstYear = year === 1
-                      const monthsWithData = isFirstYear ? monthlyData.slice(1) : monthlyData
-                      const positiveMonths = monthsWithData.filter(m => m.variation > 0.01).length
-                      const negativeMonths = monthsWithData.filter(m => m.variation < -0.01).length
+                      const positiveMonths = monthlyData.filter(m => m.variation > 0.01).length
+                      const negativeMonths = monthlyData.filter(m => m.variation < -0.01).length
 
                       return (
                         <div key={year} data-pdf-section={`year-${s.isin}-${year}`} className="mb-4 border border-slate-200 rounded-lg overflow-hidden">
@@ -1215,10 +1249,10 @@ export default function App() {
                             <thead className="bg-slate-50 text-slate-600">
                               <tr>
                                 <th className="text-left px-2 py-1.5">Mois</th>
-                                <th className="text-right px-2 py-1.5">Valeur</th>
+                                <th className="text-right px-2 py-1.5 bg-slate-100">Début</th>
                                 <th className="text-right px-2 py-1.5">DCA</th>
                                 <th className="text-right px-2 py-1.5">Var.</th>
-                                <th className="text-right px-2 py-1.5">%</th>
+                                <th className="text-right px-2 py-1.5 bg-slate-100">Fin</th>
                                 <th className="text-right px-2 py-1.5">Investi</th>
                                 <th className="text-right px-2 py-1.5">Gains</th>
                                 <th className="text-right px-2 py-1.5">Rend.</th>
@@ -1227,18 +1261,17 @@ export default function App() {
                             <tbody>
                               {monthlyData.map((m, mIdx) => {
                                 const monthNames = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc']
-                                const globalMonthIdx = startIdx + mIdx
                                 return (
                                   <tr key={m.month} className={mIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                                     <td className="px-2 py-1 font-medium">{monthNames[m.month - 1]}</td>
-                                    <td className="px-2 py-1 text-right font-bold">{fmtCur.format(m.value)}</td>
+                                    <td className="px-2 py-1 text-right text-slate-600 bg-slate-50">
+                                      {fmtCur.format(m.valueStart)}
+                                    </td>
                                     <td className="px-2 py-1 text-right text-blue-600">{m.dcaAdded > 0 ? `+${fmtCur.format(m.dcaAdded)}` : '—'}</td>
                                     <td className={`px-2 py-1 text-right ${m.variation >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                      {globalMonthIdx === 0 ? '—' : `${m.variation >= 0 ? '+' : ''}${fmtCur.format(m.variation)}`}
+                                      {m.variation >= 0 ? '+' : ''}{fmtCur.format(m.variation)}
                                     </td>
-                                    <td className={`px-2 py-1 text-right ${m.variationPct >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                      {globalMonthIdx === 0 ? '—' : `${(m.variationPct * 100).toFixed(1)}%`}
-                                    </td>
+                                    <td className="px-2 py-1 text-right font-bold bg-slate-50">{fmtCur.format(m.valueEnd)}</td>
                                     <td className="px-2 py-1 text-right text-slate-600">{fmtCur.format(m.totalInvested)}</td>
                                     <td className={`px-2 py-1 text-right ${m.totalInterestEarned >= 0 ? 'text-amber-600' : 'text-red-600'}`}>
                                       {m.totalInterestEarned >= 0 ? '+' : ''}{fmtCur.format(m.totalInterestEarned)}
